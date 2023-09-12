@@ -11,60 +11,70 @@
 
 hirom
 
-	ORG	0
 ; Page 0 variables
+	ORG	0
+_S0:	skip 1	; scratch RAM for intermediate data
+_S1:	skip 1
+_S2:	skip 1
+_S3:	skip 1
+_S4:	skip 1
+_S5:	skip 1
+TempFlags:	skip 1
+CurrentTrack:	skip 1
+CurVoiceBit:	skip 1
+CurVoiceAddr:	skip 1
+KeyOnShadow:	skip 1	; key-on bitmask
+
+PrevMsg:		skip 1
 
 ; 0: engine is running
 ; 1: halve BGM tempo
 ; 2: if bit 1 is set, skip BGM updates
-; 3: initialize DSP
-; 4: events are being preprocessed
-GlobalFlags:		skip 1
+; 3: events are being preprocessed
+; 4: monaural mode
+GlobalFlags:	skip 1
 
-ScratchArea:		skip 5	; local variables take place here
-
-;NoiseShadow:		skip 1	; DSP Flags & $1F
-;DSPFlagShadow:		skip 1	; DSP Flags & $E0
-KeyOnShadow:		skip 1
-CurrentTrack:		skip 1
-CurPreprocTrack:	skip 1
-
-
-BGMTempo:		skip 1
-Timer0Ticks:		skip 1
-Timer1Ticks:		skip 1
+BGMTempo:	skip 1
+Timer0Ticks:	skip 1
+Timer1Ticks:	skip 1
 SFXDivCounter:		skip 1	; must be 1..8
 MiscDivCounter:		skip 1	; must be 1..5
+CurPreprocTrack:	skip 1	; number of channel to be preprocessed
 
+	ORG	$20
 
-NoteLen_H:		skip 16	; $2C
-NoteLen_L:		skip 16	; $3C
-TrackPtr_L:		skip 16	; $4C
-TrackPtr_H:		skip 16	; $5C
-FineTune:		skip 16	; $6C
-MeanPitch_H:		skip 16	; $7C	; used for pitch slide and vibrato
-MeanPitch_L:		skip 16	; $8C	; used for pitch slide and vibrato
-t_PitchSlideSteps:	skip 16	; $9C
-t_VibSteps:		skip 16	; $AC
-t_VibInterval:		skip 16 ; $BC
-t_VibDelay:		skip 16	; $CC
-PrevEnvLvl:		skip 16
-SndStackPtr:		skip 16 ; $DC
+; 0: active
+; 1: long duration on
+; 2: echo on
+; 3: noise on
+; 5: overridden by SFX
+; 6: already ready for key-on
+; 7: track audible (no rest)
+SndFlags:	skip 16
 
-BGMSwitch:		skip 1	; $ED
-MsgBuffer:		skip 1
+NoteDur_L:	skip 16	; 16-bit duration
+NoteDur_H:	skip 16
+TrkPtr_L:	skip 16	; track pointer
+TrkPtr_H:	skip 16
+SndTimbre:	skip 16	; instrument
+SndFineTune:	skip 16	; pitch tuning
+t_PitchSlideTimer:	skip 16	; pitch slide timer
+t_PitchSlideSteps:	skip 16	; pitch slide steps left
+t_VibTimer:	skip 16	; vibrato interval timeout
+t_VibSteps:	skip 16	; vibrato cycle steps left
+t_TremTimer:	skip 16
+SndStackPtr:	skip 16	; current stack pointer
 
 
 ; Memory-mapped hardware registers, also in page 0
-	ORG	$F0
-		skip 1	; debug register, never use
-HWControl:	skip 1
+	ORG	$F1
+ControlReg:	skip 1
 DSPAddr:	skip 1
 DSPData:	skip 1
-IOPort0:	skip 1
-IOPort1:	skip 1
-IOPort2:	skip 1
-IOPort3:	skip 1
+Port0:	skip 1
+Port1:	skip 1
+Port2:	skip 1
+Port3:	skip 1
 IOUnused0:	skip 1	; can be used as RAM
 IOUnused1:	skip 1	; can be used as RAM
 Timer0:		skip 1
@@ -75,60 +85,43 @@ Timer1_out:	skip 1
 Timer2_out:	skip 1
 
 ; Direct page 1 variables
-PitchSlideTimer:	skip 16	; $100
-TrackOperating:		skip 16	; $110
-DefaultDur_L:		skip 16 ; $120
-DefaultDur_H:		skip 16 ; $130
-Transpose:		skip 16 ; $140
+			skip 16
+Transpose:	skip 16	; signed pitch offset in semitones
 
-; 0: portamento on
-; 1: vibrato on
-; 2: tremolo on
-; 6: already ready for key-on
-; 7: track audible (no rest)
-EffectFlags:		skip 16	; $150
+; S-DSP sound parameters
+SndVol_L:	skip 16	; left channel volume
+SndVol_R:	skip 16	; right channel volume
+SndADSR1:	skip 16	; ADSR 1 value
+SndADSR2:	skip 16	; ADSR 2 value
 
-PitchSlideDelayTimer:	skip 16	; $160
-PitchSlideDelta:	skip 16 ; $170
-PitchSlideAltCntr:	skip 16	; $180
-LongNote:		skip 16	; $190
-ChannelOverride:	skip 16	; $1A0
-PitchSlideDelay:	skip 16	; $1B0
-PitchSlideInterval:	skip 16	; $1C0
-PitchSlideLen:		skip 16 ; $1D0
-PitchSlideAltLen:	skip 16 ; $1E0
-			skip 16	; $1F0	; program stack
+t_PitchSlideDelay:	skip 16	; pitch slide delay timeout
+t_VibDelay:	skip 16	; vibrato delay timeout
+t_PitchSlideStepsDown:	skip 16	; pitch slide down steps left
 
+DfltNoteDur_L:	skip 16	; Current default duration.
+DfltNoteDur_H:	skip 16
 
-; From here, these variables cannot be accessed using direct page addressing
-VibratoLen:		skip 16	; $200
-VibratoInterval:	skip 16	; $210
-VibratoDelay:		skip 16	; $220
+PitchSlideDelay:	skip 16	; stored pitch slide delay
+PitchSlideInterval:	skip 16	; stored pitch slide interval (time between steps)
+PitchSlideSteps:	skip 16	; stored total pitch slide steps
+PitchSlideStepsDown:	skip 16	; stored pitch slide steps in opposite direction
+PitchSlideDelta:	skip 16	; pitch slide pitch delta (linear, signed)
 
-MasterL_Shadow:		skip 1	; $230
-MasterR_Shadow:		skip 1	; $231
-EchoL_Shadow:		skip 1	; $232
-EchoR_Shadow:		skip 1	; $233
+VibDelay:	skip 16	; stored vibrato delay
+VibLen:		skip 16	; steps per vibrato cycle
+VibInterval:	skip 16	; stored vibrato interval (time between steps) 
+VibDelta:	skip 16	; vibrato pitch delta (linear, signed)
 
-VibratoDepth:		skip 16	; $234
+SndEnvLvl:	skip 16	; current ADSR envelope level
 
-SndSRCN:		skip 16	; $244
-SndVolL:		skip 16	; $254
-SndVolR:		skip 16	; $264
-SndADSR1:		skip 16	; $274
-SndADSR2:		skip 16	; $284
-SndEchoFlag:		skip 16	; $294
+t_TremDelay:		skip 16	; $2A4
+TremInterval:		skip 16	; $2C4
+TremDelta:		skip 16	; $2D4
+t_TremLen:		skip 16	; $2E4
+TremLen:		skip 16	; $2F4
+TremDelay:		skip 16	; $304
 
-TremoloDelayTimer:	skip 16	; $2A4
-TremoloTimer:		skip 16	; $2B4
-TremoloInterval:	skip 16	; $2C4
-TremoloDepth:		skip 16	; $2D4
-TremoloCntr:		skip 16	; $2E4
-TremoloLen:		skip 16	; $2F4
-TremoloDelay:		skip 16	; $304
-VolL_Copy:		skip 16	; $314	; used for tremolo
-VolR_Copy:		skip 16	; $324	; used for tremolo
-
+; Subroutine stack. The maximum nest level is 8.
 Stack_PtrL:		skip 128	; $334
 Stack_PtrH:		skip 128	; $3B4
 Stack_RepCnt:		skip 128	; $434
@@ -179,71 +172,72 @@ SFXData	=		$2380
 	ORG	$8AA342
 	base	$4B8
 ;-----------------------------------------------------------------------------
-	MOV	MsgBuffer, IOPort0
-	SET3	GlobalFlags
+	MOV	PrevMsg, Port0
+	SET4	GlobalFlags
 	MOV	X, #0			; clear X
-	MOV	Y, MsgBuffer		; read previous message
+	MOV	DSPAddr, #$7D
+	MOV	DSPData, X		; set the echo delay to 0 ms
+	MOV	Y, PrevMsg		; read previous message
 TransferMode:
--	CMP	Y, IOPort0		; has SNES sent next data?
+-	CMP	Y, Port0		; has SNES sent next data?
 	BEQ	-			; repeat if not
-	MOV	Y, IOPort0		; load message ID into Y
-	BBC0	IOPort0, +		; if it is even, branch
+	MOV	Y, Port0		; load message ID into Y
+	BBC0	Port0, +		; if it is even, branch
 
-	MOV	A, IOPort1		; read data byte
-	MOV	(IOPort2+X), A		; store it at the address from IOPort2
-	MOV	IOPort0, Y		; reply to SNES
+	MOV	A, Port1		; read data byte
+	MOV	(Port2+X), A		; store it at the address from IOPort2
+	MOV	Port0, Y		; reply to SNES
 	JMP	-			; retry
 ;-----------------------------------------------------------------------------
-+	MOV	IOPort0, Y
-	MOV	MsgBuffer, Y
-	MOV	X, #$FF
-	MOV	IOPort1, X	; indicate for SNES that engine is ready
-	MOV	SP, X	; SP = $01FF
++	MOV	Port0, Y
+	MOV	PrevMsg, Y
 
-	;MOV	MsgBuffer, Y		; store previous message
-	;JMP	(IOPort2+X)		; run program at the address from IOPort2
+	;MOV	PrevMsg, Y		; store previous message
+	;JMP	(Port2+X)		; run program at the address from IOPort2
 	JMP	ProgramStart
 ;-----------------------------------------------------------------------------
-	rep 9 : db 0
+	;rep 4 : db 0
+	rep 9 : db 0	; must be at least 8
 ;-----------------------------------------------------------------------------
 TimbreLUT:
 	rep 256 : db 0
 ;-----------------------------------------------------------------------------
 ProgramStart:
+	MOV	Port1, #$FF	; indicate for SNES that engine is ready
+	MOV	X, #$F
+	MOV	SP, X	; SP = $010F
 	CALL	SetUpEngine
 
 GetMessage:	; $606
-	MOV	Y, IOPort0	; read message ID
-	CMP	Y, MsgBuffer	; has SNES sent next message?
-	BEQ	NoMessage	; branch if no
-	MOV	A, IOPort1	; read first byte of message
-	MOV	X, IOPort2	; read second byte of message
-	MOV	IOPort0, Y	; reply to SNES
-	MOV	MsgBuffer, Y	; store message ID
+	MOV	Y, Port0	; read message ID
+	CMP	Y, PrevMsg	; has SNES sent next message?
+	BEQ	MainLoop	; branch if no
+	MOV	A, Port1	; read first byte of message
+	MOV	X, Port2	; read second byte of message
+	MOV	Port0, Y	; reply to SNES
+	MOV	PrevMsg, Y	; store message ID
 
 	CMP	A, #$FF
 	BEQ	GotoTransferMode
 	CMP	A, #$FE
 	BEQ	StartSound
-	CMP	A, #$FD
-	BEQ	SetBGMSwitch
-	CMP	A, #$FC
-	BEQ	SetMonoFlag
+	;CMP	A, #$FD
+	;BEQ	SetBGMSwitch
+	;CMP	A, #$FC
+	;BEQ	SetMonoFlag
 
 	; play SFX
 	CALL	PlaySFX
 	JMP	GetMessage
 ;-----------------------------------------------------------------------------
-SetBGMSwitch:	; $635
-	MOV	BGMSwitch, X
-	JMP	GetMessage
-;-----------------------------------------------------------------------------
-SetMonoFlag:	; $63C
-	JMP	GetMessage
+;SetBGMSwitch:
+;SetMonoFlag:
+;	JMP	GetMessage
+;	JMP	GetMessage
 ;-----------------------------------------------------------------------------
 GotoTransferMode:	; $71F
 	MOV	X, #0
-	MOV	IOPort1, X
+	MOV	Port1, X
 	MOV	DSPAddr, #$5C	; key-off
 	MOV	DSPData, #-1	; mute all channels
 	MOV	DSPAddr, #$D	; echo feedback
@@ -255,206 +249,195 @@ StartSound:	; $643
 	MOVW	YA, Timer0_out
 	JMP	GetMessage
 ;-----------------------------------------------------------------------------
-NoMessage:	; $649
+MainLoop:	; $649
 	BBC0	GlobalFlags, PreprocessTracks
 
-	CLR4	GlobalFlags
+	CLR3	GlobalFlags
 
 	CLRC
-	ADC	Timer0Ticks, Timer0_out
-	BEQ	SkipBGMUpdate
-	DEC	Timer0Ticks
+	ADC	Timer0Ticks, Timer0_out	; has the BGM timer ticked?
+	BEQ	SkipBGMUpdate		; branch if no
 
+	BBC1	GlobalFlags, +	; Branch if tempo not halved.
+	BBS2	GlobalFlags, ++	; Skip updates every second tick.
+
++	MOV	CurrentTrack, #0
+	CALL	UpdateTracks
+
+++	DEC	Timer0Ticks
 	EOR	GlobalFlags, #4
-	MOV	CurrentTrack, #0
-
-UpdateBGM:
-	CALL	UpdateTrack
-	INC	CurrentTrack	; increment channel index
-	CMP	CurrentTrack, #8
-	BCC	UpdateBGM
-	CALL	WriteKeyOn
 
 SkipBGMUpdate:
-	CLRC
-	ADC	Timer1Ticks, Timer1_out
-	BEQ	PreprocessTracks
-	DEC	Timer1Ticks
+	CMP	Port0, PrevMsg	; has SNES sent next message?
+	BNE	GetMessage	; branch if yes
 
-	DBNZ	SFXDivCounter, SkipSFXUpdate
+	CLRC
+	ADC	Timer1Ticks, Timer1_out	; has the main timer ticked?
+	BEQ	PreprocessTracks	; branch if no
+
+	DBNZ	SFXDivCounter, +
 	MOV	SFXDivCounter, #8
 
 	MOV	CurrentTrack, #8
+	CALL	UpdateTracks
 
-UpdateSFX:
-	MOV	X, CurrentTrack
-	MOV	A, $1A0-8+X
-	BEQ	+
-	CALL	UpdateTrack
-+	INC	CurrentTrack
-	CMP	CurrentTrack, #16
-	BCC	UpdateSFX
-	CALL	WriteKeyOn
-
-SkipSFXUpdate:
-	DBNZ	MiscDivCounter, PreprocessTracks
++	DBNZ	MiscDivCounter, FinishSFX
 	MOV	MiscDivCounter, #5
 
 	MOV	CurrentTrack, #0
+	MOV	DSPAddr, #0	; Go to channel #0 volume
 
 UpdateTracks2:
 	MOV	X, CurrentTrack
-	MOV	A, $1A0+X	; is the channel used by SFX?
+	MOV	A, SndFlags+X
+	AND	A, #$20		; is the channel used by SFX?
 	BEQ	+		; branch if no
-	OR	CurrentTrack, #8
-+	CALL	UpdateTrack2
-	AND	CurrentTrack, #7
+	OR	CurrentTrack, #8	; process a SFX channel instead
++	CALL	UpdateTrack2	; update pitch bend
+	AND	CurrentTrack, #7	; revert to BGM
 	INC	CurrentTrack
-	CMP	CurrentTrack, #8
-	BCC	UpdateTracks2
+	ADC	DSPAddr, #$D	; Go to next channel volume
+	BPL	UpdateTracks2
 
+FinishSFX:
+	DEC	Timer1Ticks
+
+; If we have finished all pending tasks above, try to asynchronously process
+; sound data for each channel in a round-robin manner.
+; Why are we doing this?
+; Occasionally, we may run into a large number of sound control events which
+; take lots of time to process, making the sound stall a little bit.
+; Instead of wasting cycles while busy-waiting for timers and messages from
+; SNES, we can spend our idle time by performing time-consuming tasks such as
+; processing the events and preparing to play a note, whenever we can.
+; The result is much less lag and thus smoother rhythm.
 PreprocessTracks:
-	CMP	MsgBuffer, IOPort0	; has SNES sent next message?
-	BNE	Goto_GetMessage		; branch if yes
+	CMP	Port0, PrevMsg	; has SNES sent next message?
+	BNE	Goto_GetMessage	; branch if yes
 
 	BBC0	GlobalFlags, +
 
 	CLRC
-	ADC	Timer0Ticks, Timer0_out
-	BNE	Goto_GetMessage
-	CLRC
-	ADC	Timer1Ticks, Timer1_out
-	BNE	Goto_GetMessage
+	ADC	Timer0Ticks, Timer0_out	; has the BGM timer ticked?
+	BNE	Goto_GetMessage		; branch if yes
+	ADC	Timer1Ticks, Timer1_out	; has the main timer ticked?
+	BNE	Goto_GetMessage		; branch if yes
 
-+	INC	CurPreprocTrack
-	AND	CurPreprocTrack, #15
++	AND	CurPreprocTrack, #15
 	MOV	X, CurPreprocTrack
+	INC	CurPreprocTrack
 
-	MOV	A, $110+X
-	BEQ	Goto_GetMessage
+	MOV	A, SndFlags+X	; Load track flags.
+	MOV	TempFlags, A
+	BBC0	TempFlags, FinishPreproc	; branch if not active
 
+	; Prepare the DSP address and voice bitmask variables.
+	; Also, access the ENVX register.
 	MOV	A, X
-	AND	A, #7
-	XCN	A
-	OR	A, #8
+	AND	A, #7	; Limit to 0..7.
+	MOV	Y, A
+	XCN	A	; A <<= 4
+	MOV	CurVoiceAddr, A	; We have a DSP channel address.
+	OR	A, #8		; Go to ENVX register.
 	MOV	DSPAddr, A
-	MOV	A, DSPData
-	CMP	A, PrevEnvLvl+X
-	MOV	PrevEnvLvl+X, A
-	BCS	+
-	OR	A, #0
-	BNE	+
-	MOV	A, $150+X	; effects
-	AND	A, #$7F
-	MOV	$150+X, A
+	MOV	A, VoiceBitMask+Y	; Get the bitmask for the channel.
+	MOV	CurVoiceBit, A
+
+	MOV	A, DSPData	; Read the current ADSR envelope level.
+	CMP	A, SndEnvLvl+X	; Compare with the level measured earlier.
+	MOV	SndEnvLvl+X, A	; Store it.
+	BCS	+	; Branch if the envelope does not ramp down.
+	MOV	Y, A	; Did it reach zero though?
+	BNE	+	; Branch if not.
+	CLR7	TempFlags	; Clear the "channel audible" flag.
 
 +	MOV	CurrentTrack, X
-	MOV	A, TrackPtr_L+X
-	MOV	Y, TrackPtr_H+X
-	MOVW	1, YA
+	MOV	A, TrkPtr_L+X	; load the track pointer
+	MOV	Y, TrkPtr_H+X
+	MOVW	0, YA
 	MOV	Y, #0
-	MOV	A, (1)+Y
-	BMI	Preproc_RestOrNote
-	MOV	X, A
-	MOV	A, EventTypeTable+X
-	BMI	+
-	BEQ	Goto_GetMessage
-	MOV	X, CurrentTrack
-	MOV	A, $150+X	; effects
-	BMI	Goto_GetMessage
+	MOV	A, (0)+Y		; read a track byte
+	BMI	Preproc_RestOrNote	; branch if this is a note or rest
+	;CMP	A, #$33
+	;BCS	FinishPreproc	; branch on invalid data
+	MOV	2, A		; Preserve the event type.
+	MOV	Y, A
+	MOV	A, EventTypeTable+Y	; check the type of the sound event
+	BMI	+		; branch if it can be run without any trouble
+	BEQ	FinishPreproc	; branch if it must always be run synchronously
+	BBS7	TempFlags, FinishPreproc	; Branch if the track is audible.
 
-+	SET4	GlobalFlags
-	MOV	A, (1)+Y
-	INC	Y
++	SET3	GlobalFlags	; Set the "async sound events" flag.
+	MOV	Y, #1	; Go to the next track byte.
+	MOV	A, 2
 	ASL	A
 	MOV	X, A
-	JMP	(TrackEventTable+X)
-;-----------------------------------------------------------------------------
-Goto_GetMessage:
-	JMP	GetMessage
-;-----------------------------------------------------------------------------
+	JMP	(TrackEventTable+X)	; run the sound event
+; -----------------------------------------------------------------------------
 Preproc_RestOrNote:
+	BBS6	TempFlags, FinishPreproc	; Branch if ready for key-on.
+	BBS7	TempFlags, FinishPreproc	; Branch if audible.
+
 	CMP	A, #$80
 	BEQ	Preproc_Rest
 
-	PUSH	A
-	MOV	A, $1A0+X
-	POP	A
-	BNE	Goto_GetMessage
+	BBS5	TempFlags, FinishPreproc	; Branch if the channel in use by SFX.
 
-	PUSH	A
-	MOV	A, $150+X	; effects
-	AND	A, #$C0
-	POP	A
-	BNE	Goto_GetMessage
+	CALL	PrepareNote	; Prepare a note for key-on.
 
-	PUSH	A
-	MOV	A, PrevEnvLvl+X
-	POP	A
-	BNE	Goto_GetMessage
-
-	CALL	PrepareNote
-	MOV	A, $150+X	; effects
-	OR	A, #$40
-	MOV	$150+X, A
+	SET6	TempFlags	; Set the "ready for key-on" flag.
+FinishPreproc:
+	MOV	A, TempFlags	; Save track flags.
+	MOV	SndFlags+X, A
+Goto_GetMessage:
 	JMP	GetMessage
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 Preproc_Rest:
-	MOV	A, $150+X	; effects
-	AND	A, #$C0
-	BNE	Goto_GetMessage
-	INC	Y
-
-	CLRC
-	MOV	A, $120+X	; is default note duration set?
+	INC	Y	; proceed to the next track byte
+	MOV	A, DfltNoteDur_L+X	; is default note duration set?
 	BEQ	+		; branch if not
-	MOV	3, A	; set duration LSB
-	MOV	A, $130+X
-	MOV	4, A	; set duration MSB
+	MOV	2, A	; set duration LSB
+	MOV	A, DfltNoteDur_H+X
+	MOV	3, A	; set duration MSB
 	JMP	++
-
-+	MOV	A, $190+X	; is 16-bit note duration mode on?
-	MOV	4, A
-	BEQ	+		; branch if not
-	MOV	A, (1)+Y	; get duration MSB
-	MOV	4, A
+; -----------------------------------------------------------------------------
++	MOV	A, #0		; Placeholder value.
+	BBC1	TempFlags, +	; Branch if long duration mode off.
+	MOV	A, (0)+Y	; Get duration MSB.
 	INC	Y
-+	MOV	A, (1)+Y	; get duration LSB
-	MOV	3, A
++	MOV	3, A
+	MOV	A, (0)+Y	; Get duration LSB.
+	MOV	2, A
 	INC	Y
-++	MOV	5, Y
-	MOV	A, NoteLen_L+X
-	MOV	Y, NoteLen_H+X
-	ADDW	YA, 3
-	BCS	Goto_GetMessage
-	MOV	NoteLen_L+X, A
-	MOV	NoteLen_H+X, Y
-	MOV	A, 5
+++	MOV	4, Y	; Preserve the track data offset.
+	MOV	A, NoteDur_L+X
+	MOV	Y, NoteDur_H+X
+	ADDW	YA, 2	; Add the rest length to the current rest duration.
+	BCS	+	; Branch if the result does not fit into 16 bits.
+	MOV	NoteDur_L+X, A	; Store the result.
+	MOV	NoteDur_H+X, Y
+	MOV	A, 4
 	MOV	Y, #0
-	ADDW	YA, 1
-	MOV	TrackPtr_L+X, A	; store pointer LSB
-	MOV	TrackPtr_H+X, Y	; store pointer MSB
-	JMP	GetMessage
-;-----------------------------------------------------------------------------
+	ADDW	YA, 0	; Add the track offset the pointer.
+	MOV	TrkPtr_L+X, A	; store pointer LSB
+	MOV	TrkPtr_H+X, Y	; store pointer MSB
++	JMP	FinishPreproc
+; =============================================================================
 SoftKeyRelease:
-	MOV	A, $1A0+X
-	BNE	+
+	BBS5	TempFlags, +	; Skip if channel in use by SFX.
 SoftKeyRelease2:
-	MOV	A, X
-	AND	A, #7
-	XCN	A
+	MOV	A, CurVoiceAddr
+SoftKeyRelease3:
 	OR	A, #7
 	MOV	DSPAddr, A
 	MOV	DSPData, #$BF
 	SETC
 	SBC	DSPAddr, #2
 	CLR7	DSPData
-
-	MOV	A, $150+X	; effects
-	AND	A, #$7F
-	MOV	$150+X, A
+	MOV	A, #127
+	MOV	SndEnvLvl+X, A
 +	RET
-;-----------------------------------------------------------------------------
+; =============================================================================
 WriteKeyOn:
 	MOV	A, KeyOnShadow
 	BEQ	+
@@ -466,542 +449,488 @@ WriteKeyOn:
 -	DBNZ	Y, -	; short delay as a workaround for buggy SNES emulators
 	MOV	KeyOnShadow, Y
 +	RET
-;-----------------------------------------------------------------------------
-UpdateTrack:	; $74E
+; =============================================================================
+UpdateTracks:
+	; Initialise variables for channel #0.
+	MOV	CurVoiceBit, #1
+	MOV	CurVoiceAddr, #0
+	MOV	KeyOnShadow, #0
+
+NextTrack:
 	MOV	X, CurrentTrack
-	; Update note countdown timer. If it expires, process next data.
 
-	MOV	A, $110+X
-	BEQ	+
+	MOV	A, SndFlags+X	; Load track flags.
+	MOV	TempFlags, A
+	BBC0	TempFlags, +	; Branch if track inactive.
 
-	; Decrement note duration. If one tick is left, mute the channel.
-	; If zero ticks are left, run next sound command.
-	MOV	A, NoteLen_L+X
-	MOV	Y, NoteLen_H+X
+	MOV	A, NoteDur_L+X	; Load note/rest duration.
+	MOV	Y, NoteDur_H+X
+	MOVW	0, YA
+	MOVW	YA, 0		; Is it zero?
+	BEQ	FetchNextEvent	; Branch if yes.
+	DECW	0		; Decrement it.
+	BEQ	FetchNextEvent	; Branch if it became zero.
+	MOVW	YA, 0
+	MOV	NoteDur_L+X, A	; Save note/rest duration.
+	MOV	NoteDur_H+X, Y
 
-	CMP	X, #8
-	BCS	.decDur
-	BBC1	GlobalFlags, .decDur
-	BBC2	GlobalFlags, .checkDur
-
-.decDur:
-	MOVW	1, YA
-	MOVW	YA, 1
-	BEQ	FetchNextEvent
-	DECW	1
-	BEQ	FetchNextEvent
-	MOVW	YA, 1
-	MOV	NoteLen_L+X, A
-	MOV	NoteLen_H+X, Y
-
-	CMP	X, #8
-	BCS	.checkDur
-	BBC1	GlobalFlags, .checkDur
-	BBS2	GlobalFlags, +
-
-.checkDur:
+	; Release key on the last tick.
 	CMP	A, #1
 	BNE	+
 	MOV	A, Y
 	BNE	+
-	MOV	A, $150+X	; effects
-	AND	A, #$40
-	BEQ	SoftKeyRelease
+	BBS6	TempFlags, +	; Branch if a note is ready for key-on.
+	CALL	SoftKeyRelease
++
+FinishTrackUpdate:
+	MOV	X, CurrentTrack
+	MOV	A, TempFlags	; Save track flags.
+	MOV	SndFlags+X, A
+	INC	CurrentTrack	; Go to the next track.
+	ASL	CurVoiceBit
+	ADC	CurVoiceAddr, #$10
+	BPL	NextTrack
+
+	; Now write the key-on mask to the DSP.
+	MOV	A, KeyOnShadow
+	BEQ	+	; Do not bother if nothing to key-on.
+	MOV	DSPAddr, #$5C
+	MOV	DSPData, #0
+	MOV	DSPAddr, #$4C
+	MOV	DSPData, A
 +	RET
-;-----------------------------------------------------------------------------
-FetchNextEvent:	; $78B
-	MOV	A, TrackPtr_L+X
-	MOV	Y, TrackPtr_H+X
-	MOVW	1, YA
+; =============================================================================
+FetchNextEvent:
+	MOV	A, TrkPtr_L+X	; Load track data pointer.
+	MOV	Y, TrkPtr_H+X
+	MOVW	0, YA
 	MOV	Y, #0
+	BBS6	TempFlags, TriggerNote	; Branch if ready for key-on.
 FetchNextEvent2:
-	MOV	A, (1)+Y
-	BMI	GotoPlayNote
-	INC	Y
+	MOV	A, (0)+Y
+	BMI	GotNote	; Branch on note/rest.
+	INC	Y	; Go to the next byte.
 	ASL	A
 	MOV	X, A
-	JMP	(TrackEventTable+X)
-;-----------------------------------------------------------------------------
+	JMP	(TrackEventTable+X)	; Run an event handler.
+; =============================================================================
+SetMasterVolume:	; dummied out
+	INC	Y
+SetTimerFreq:		; dummied out
+SetJumpCond:		; dummied out
 IncAndFinishEvent:
 	INC	Y
 FinishEvent:
-	BBC4	GlobalFlags, FetchNextEvent2
+	BBC3	GlobalFlags, FetchNextEvent2
+
 	MOV	X, CurrentTrack
 	MOV	A, Y
 	MOV	Y, #0
-	ADDW	YA, 1
-	MOV	TrackPtr_L+X, A	; store pointer LSB
-	MOV	TrackPtr_H+X, Y	; store pointer MSB
+	ADDW	YA, 0
+	MOV	TrkPtr_L+X, A	; store pointer LSB
+	MOV	TrkPtr_H+X, Y	; store pointer MSB
+	DEC	CurPreprocTrack		; Process the track again.
+	MOV	A, TempFlags		; Store the flags.
+	MOV	SndFlags+X, A
 	JMP	GetMessage
-;-----------------------------------------------------------------------------
+; =============================================================================
+; Key-off and set rest duration.
 ProcessRest:
 	CALL	SoftKeyRelease2
-Goto_SetDuration:
-	MOV	A, $150+X	; effects
-	AND	A, #$3F
-	MOV	$150+X, A
 	JMP	SetDuration
-;-----------------------------------------------------------------------------
-GotoPlayNote:
-	INC	Y
-
-	PUSH	A
+; =============================================================================
+GotNote:
 	MOV	X, CurrentTrack
-	MOV	A, $1A0+X	; is the channel used by SFX?
-	POP	A
-	BNE	Goto_SetDuration
+	BBS5	TempFlags, SetDuration
 	CMP	A, #$80			; is the event a rest?
 	BEQ	ProcessRest		; if yes, branch
 
-	PUSH	A
-	MOV	A, $150+X	; effects
-	AND	A, #$40
-	POP	A
-	BNE	+
-	PUSH	Y
+	MOV	5, Y	; Preserve Y.
 	CALL	PrepareNote
-	POP	Y
-+	MOV	A, VoiceBitTable+X
-	TSET	KeyOnShadow, A
-	MOV	A, $150+X	; effects
-	AND	A, #$3F
-	OR	A, #$80
-	MOV	$150+X, A
+	MOV	Y, 5
+TriggerNote:
+	OR	KeyOnShadow, CurVoiceBit
+	CLR6	TempFlags
+	SET7	TempFlags	; Set the "track audible" flag.
 	MOV	A, #0
-	MOV	PrevEnvLvl+X, A
+	MOV	SndEnvLvl+X, A
 
 SetDuration:
-	MOV	A, $120+X	; is default note duration set?
+	INC	Y
+	MOV	A, DfltNoteDur_L+X	; is default note duration set?
 	BEQ	+		; branch if not
-	MOV	NoteLen_L+X, A	; set duration LSB
-	MOV	A, $130+X
-	MOV	NoteLen_H+X, A	; set duration MSB
+	MOV	NoteDur_L+X, A	; set duration LSB
+	MOV	A, DfltNoteDur_H+X
+	MOV	NoteDur_H+X, A	; set duration MSB
 	JMP	++
-
-+	MOV	A, $190+X	; is 16-bit note duration mode on?
-	BEQ	+		; branch if not
-	MOV	A, (1)+Y	; get duration MSB
-	MOV	NoteLen_H+X, A
+; -----------------------------------------------------------------------------
++	BBC1	TempFlags, +	; Branch if long duration mode off.
+	MOV	A, (0)+Y	; get duration MSB
+	MOV	NoteDur_H+X, A
 	INC	Y
-+	MOV	A, (1)+Y	; get duration LSB
-	MOV	NoteLen_L+X, A
++	MOV	A, (0)+Y	; get duration LSB
+	MOV	NoteDur_L+X, A
 	INC	Y
 
-++
-	MOV	A, Y
+++	MOV	A, Y
 	MOV	Y, #0
-	ADDW	YA, 1
-	MOV	TrackPtr_L+X, A	; store pointer LSB
-	MOV	TrackPtr_H+X, Y	; store pointer MSB
-	RET
-;-----------------------------------------------------------------------------
+	ADDW	YA, 0
+	MOV	TrkPtr_L+X, A	; store pointer LSB
+	MOV	TrkPtr_H+X, Y	; store pointer MSB
+	JMP	FinishTrackUpdate
+; =============================================================================
 PrepareNote:
 	MOV	DSPAddr, #$5C
-	PUSH	A
-	MOV	A, VoiceBitTable+X
-	MOV	DSPData, A	; turn off the note, just in case
-	POP	A
+	MOV	DSPData, CurVoiceBit	; Key-off the channel.
 
 	; calculate pitch
 	; Note: maximum range is 5 octaves
 	CLRC
-	ADC	A, $140+X
+	ADC	A, Transpose+X
 	ASL	A
 
-	MOV	Y, FineTune+X
-	BEQ	SkipFineTune
+	; fine-tune given pitch with current fine-tune value
+	; with following formula:
+	; P=P*(1024+T)/1024, where T is fine-tune offset
+	MOV	Y, SndFineTune+X	; is fine-tune value zero?
+	BEQ	SkipTuning	; if yes, branch
 	MOV	X, A
-	MOV	5, Y
+	MOV	4, Y	; Store the original fine-tune value.
 	MOV	A, Y
-	BPL	+
+	BPL	+	; Y = abs(Y)
 	EOR	A, #-1
 	INC	A
-
-+	MOV	Y, A
-	PUSH	Y
-	MOV	A, PitchTable+X
-	MUL	YA
-	MOV	3, Y
-	MOV	4, #0
-	POP	Y
-	MOV	A, PitchTable+1+X
-	MUL	YA
-	ADDW	YA, 3
-	MOV	4, Y
-
-	LSR	4
+	MOV	Y, A
++	MOV	3, Y
+	MOV	A, PitchTable+X	; read LSB of base pitch value
+	MUL	YA	; multiple it with fine-tune value
+	MOV	2, Y	; store MSB of the result as LSB of pitch offset
+	MOV	Y, 3	; get fine-tune multiplier again
+	MOV	3, #0	; clear MSB of pitch offset
+	MOV	A, PitchTable+1+X	; read MSB of base pitch value
+	MUL	YA	; multiple it with fine-tune value
+	ADDW	YA, 2	; add pitch offset to the result
+	MOV	3, Y	; store MSB of the result as MSB of the variable
+	LSR	3	; divide the result by 4
 	ROR	A
-	LSR	4
+	LSR	3
 	ROR	A
-	MOV	3, A
+	MOV	2, A	; store LSB of the result as LSB of pitch offset
+	MOV	A, PitchTable+1+X ; read LSB of seed pitch value
+	MOV	Y, A	
+	MOV	A, PitchTable+X	; read MSB of seed pitch value
+	BBS7	4, +	; branch on negative fine-tune
+	ADDW	YA, 2	; add given pitch offset to seed pitch
+	JMP	TuningDone
+; -----------------------------------------------------------------------------
++	SUBW	YA, 2	; subtract given pitch offset from seed pitch
+	JMP	TuningDone
+; -----------------------------------------------------------------------------
+SkipTuning:
+	; simply get the pitch value from the table
+	MOV	X, A
 	MOV	A, PitchTable+1+X
 	MOV	Y, A
 	MOV	A, PitchTable+X
-	MOV	X, 5
-	BMI	+
-	ADDW	YA, 3
-	JMP	++
+TuningDone:
+	MOVW	2, YA	; Now we have the pitch value.
+	MOV	X, CurrentTrack
 
-+	SUBW	YA, 3
-++	MOVW	3, YA
-	JMP	Loc81F
-;-----------------------------------------------------------------------------
-SkipFineTune:	; $814
-	MOV	X, A
-	MOV	A, PitchTable+X
-	MOV	3, A
-	MOV	A, PitchTable+1+X
-	MOV	4, A
+	; Copy initial pitch slide parameters.
+	MOV	A, PitchSlideDelay+X	; delay
+	MOV	t_PitchSlideDelay+X, A
+	MOV	A, PitchSlideInterval+X	; interval
+	MOV	t_PitchSlideTimer+X, A
+	MOV	A, PitchSlideSteps+X	; total up/down steps
+	MOV	t_PitchSlideSteps+X, A
+	MOV	A, PitchSlideStepsDown+X	; steps of going down
+	MOV	t_PitchSlideStepsDown+X, A
 
-Loc81F:
-	MOV	A, CurrentTrack
-	MOV	X, A
-	AND	A, #7
-	XCN	A
-	MOV	DSPAddr, A
+	; Copy initial vibrato parameters.
+	MOV	A, VibDelta+X
+	BPL	+	; Delta=abs(Delta)
+	EOR	A, #-1
+	INC	A
+	MOV	VibDelta+X, A
++	MOV	A, VibLen+X	; cycle length
+	LSR	A	; divide it by 2
+	MOV	t_VibSteps+X, A
+	MOV	A, VibInterval+X	; interval
+	MOV	t_VibTimer+X, A
+	MOV	A, VibDelay+X	; delay
+	MOV	t_VibDelay+X, A
 
-	MOV	A, $254+X
+	; Copy initial tremolo parameters.
+	MOV	A, TremDelta+X
+	BPL	+	; Delta=abs(Delta)
+	EOR	A, #-1
+	INC	A
+	MOV	TremDelta+X, A
++	MOV	A, TremLen+X
+	LSR	A
+	MOV	t_TremLen+X, A
+	MOV	A, TremInterval+X
+	MOV	t_TremTimer+X, A
+	MOV	A, TremDelay+X
+	MOV	t_TremDelay+X, A
+
+	; write current sound parameters into DSP
+	MOV	DSPAddr, CurVoiceAddr
+
+	MOV	A, SndVol_L+X
 	MOV	DSPData, A	; left channel volume
 	INC	DSPAddr
-	MOV	A, $264+X
+	MOV	A, SndVol_R+X
 	MOV	DSPData, A	; right channel volume
 	INC	DSPAddr
-
-	MOV	A, $150+X
-	AND	A, #1
-	BEQ	+
-	MOV	A, $1B0+X
-	MOV	$160+X, A
-	MOV	A, $1C0+X
-	MOV	$100+X, A
-	MOV	A, $1D0+X
-	MOV	t_PitchSlideSteps+X, A
-	MOV	A, $1E0+X
-	MOV	$180+X, A
-+	; $85A
-	MOV	A, $150+X
-	AND	A, #2
-	BEQ	Loc87C
-	MOV	A, $234+X
-	BPL	+
-	EOR	A, #-1
-	INC	A
-	MOV	$234+X, A
-+	; $86C
-	MOV	A, $200+X
-	LSR	A
-	MOV	t_VibSteps+X, A
-	MOV	A, $210+X
-	MOV	t_VibInterval+X, A
-	MOV	A, $220+X
-	MOV	t_VibDelay+X, A
-Loc87C:
-	MOV	A, $150+X
-	AND	A, #4
-	BEQ	Loc8AD
-	MOV	A, $2D4+X
-	BPL	+
-	EOR	A, #-1
-	INC	A
-	MOV	$2D4+X, A
-+	; $88E
-	MOV	A, $2F4+X
-	LSR	A
-	MOV	$2E4+X, A
-	MOV	A, $2C4+X
-	MOV	$2B4+X, A
-	MOV	A, $304+X
-	MOV	$2A4+X, A
-	MOV	A, $314+X
-	MOV	$254+X, A
-	MOV	A, $324+X
-	MOV	$264+X, A
-Loc8AD:
-
+	MOV	A, 2
+	MOV	DSPData, A	; LSB of pitch value
+	INC	DSPAddr
 	MOV	A, 3
-	MOV	MeanPitch_L+X, A
-	MOV	DSPData, A	; pitch LSB
+	MOV	DSPData, A	; MSB of pitch value
 	INC	DSPAddr
-	MOV	A, 4
-	MOV	MeanPitch_H+X, A
-	MOV	DSPData, A	; pitch MSB
+	MOV	Y, SndTimbre+X
+	MOV	A, TimbreLUT+Y
+	MOV	DSPData, A	; Source number
 	INC	DSPAddr
-	MOV	A, $244+X
-	MOV	DSPData, A	; SRCN
-	INC	DSPAddr
-	MOV	A, $274+X
+	MOV	A, SndADSR1+X
 	MOV	DSPData, A	; ADSR 1
 	INC	DSPAddr
-	MOV	A, $284+X
+	MOV	A, SndADSR2+X
 	MOV	DSPData, A	; ADSR 2
 	INC	DSPAddr
 	MOV	DSPData, #127	; GAIN value if ADSR is disabled
 
-	MOV	DSPAddr, #DSP_EchoOn
-	MOV	A, $294+X
-	BEQ	+
-	MOV	A, VoiceBitTable+X
-	TSET	DSPData, A
-	RET
-;-----------------------------------------------------------------------------
-+	MOV	A, VoiceBitTable+X
-	TCLR	DSPData, A
-	RET
-;-----------------------------------------------------------------------------
-AddAndClipPitch:
-	MOV	2, A
-	MOV	A, MeanPitch_L+X
-	MOV	Y, MeanPitch_H+X
-	ADDW	YA, 1
-	BMI	++
-	CMP	Y, #$40
-	BCC	+
-	MOV	Y, #$3F
-	MOV	A, #$FF
-+	MOV	MeanPitch_H+X, Y
-	MOV	MeanPitch_L+X, A
-	RET
+	MOV	DSPAddr, #$4D
+	MOV	A, DSPData
+	OR	A, CurVoiceBit
+	BBS2	TempFlags, +
+	EOR	A, CurVoiceBit	; disable echo
++	MOV	DSPData, A
 
-++	MOV	A, #0
-	MOV	Y, A
-	MOV	MeanPitch_H+X, A
-	MOV	MeanPitch_L+X, A
+	MOV	DSPAddr, #$3D
+	MOV	A, DSPData
+	OR	A, CurVoiceBit
+	BBS3	TempFlags, +
+	EOR	A, CurVoiceBit	; disable noise
++	MOV	DSPData, A
+
 	RET
-;-----------------------------------------------------------------------------
+; =============================================================================
 UpdateTrack2:	; $91C
 	MOV	X, CurrentTrack
-	MOV	A, $150+X
+	MOV	A, SndFlags+X
 	BMI	+
+	CLR0	DSPAddr
+	SET1	DSPAddr
+	SETC
 	RET
-
-	; Update pitch slide, vibrato and tremolo
-+	AND	A, #1
-	BNE	+
-	JMP	Loc9A9
-
-+	; $926
-	MOV	A, $160+X
-	BEQ	+
-	CMP	A, #-1
-	BEQ	Loc9A9
-	DEC	A
-	MOV	$160+X, A
-	BNE	Loc9A9
-	MOV	A, #1
-	MOV	$100+X, A
-+	; $93A
-	MOV	A, $100+X
-	DEC	A
-	MOV	$100+X, A
-	BNE	Loc9A9
-	MOV	A, $1C0+X
-	MOV	$100+X, A
-	MOV	A, $180+X
-	BEQ	Loc970
-	DEC	A
-	MOV	$180+X, A
-	MOV	A, $170+X
-	EOR	A, #-1
-	INC	A
-	MOV	1, A
-	BPL	+
-	MOV	A, #-1
-	JMP	Loc962
-+	; $960
-	MOV	A, #0
-Loc962:
-	CALL	AddAndClipPitch
-	JMP	Loc98B
-Loc970:
-	MOV	A, $170+X
-	MOV	1, A
-	BPL	+
-	MOV	A, #-1
-	JMP	Loc97F
-+	; $97D
-	MOV	A, #0
-Loc97F:
-	CALL	AddAndClipPitch
-Loc98B:
-	MOV	A, X
-	AND	A, #7
-	XCN	A
-	OR	A, #DSP_Pitch
-	MOV	DSPAddr, A
-	MOV	A, MeanPitch_L+X
-	MOV	DSPData, A
-	INC	DSPAddr
-	MOV	DSPData, Y
-+	; $9A0
-	DEC	t_PitchSlideSteps+X
-	BNE	Loc9A9
-	MOV	A, #-1
-	MOV	$160+X, A
-
-Loc9A9:
-	MOV	A, $150+X
-	AND	A, #2
-	BEQ	LocA03
-	MOV	A, t_VibDelay+X
-	BEQ	+
-	DEC	t_VibDelay+X
-	JMP	LocA03
-+	; $9B8
-	DEC	t_VibInterval+X
-	BNE	LocA03
-	MOV	A, $210+X
-	MOV	t_VibInterval+X, A
-	MOV	A, $234+X
-	MOV	1, A
-	BPL	+
-	MOV	A, #-1
-	JMP	Loc9D0
-+	; $9CE
-	MOV	A, #0
-Loc9D0:
-	CALL	AddAndClipPitch
-
-	MOV	A, X
-	AND	A, #7
-	XCN	A
-	OR	A, #DSP_Pitch
-	MOV	DSPAddr, A
-	MOV	A, MeanPitch_L+X
-	MOV	DSPData, A
-	INC	DSPAddr
-	MOV	DSPData, Y
-
-	DEC	t_VibSteps+X
-	BNE	LocA03
-	MOV	A, $200+X
-	MOV	t_VibSteps+X, A
-	MOV	A, $234+X
-	EOR	A, #-1
-	INC	A
-	MOV	$234+X, A
-LocA03:
-	MOV	A, $150+X
-	AND	A, #4
-	BEQ	LocA6D
-	MOV	A, $2A4+X
+; -----------------------------------------------------------------------------
++	MOV	A, t_TremDelay+X
 	BEQ	+
 	DEC	A
-	MOV	$2A4+X, A
-	RET
+	MOV	t_TremDelay+X, A
+	JMP	FinishTremolo
+; -----------------------------------------------------------------------------
++	DEC	t_TremTimer+X
+	BNE	FinishTremolo
+	MOV	A, TremInterval+X
+	MOV	t_TremTimer+X, A
 
-+	MOV	A, $2B4+X
-	DEC	A
-	MOV	$2B4+X, A
-	BNE	LocA6D
-	MOV	A, $2C4+X
-	MOV	$2B4+X, A
-	MOV	A, $2D4+X
-	MOV	1, A
+	MOV	A, TremDelta+X
+	MOV	0, A
 	CLRC
-	ADC	A, $254+X
-	MOV	$254+X, A
-	MOV	A, 1
-	CLRC	
-	ADC	A, $264+X
-	MOV	$264+X, A
-
-	MOV	A, X
-	AND	A, #7
-	XCN	A
-	MOV	DSPAddr, A
-	MOV	A, $254+X
-	MOV	DSPData, A
+	ADC	DSPData, 0
 	INC	DSPAddr
-	MOV	A, $264+X
-	MOV	DSPData, A
+	CLRC
+	ADC	DSPData, 0
 
-	MOV	A, $2E4+X
+	MOV	A, t_TremLen+X
 	DEC	A
-	MOV	$2E4+X, A
-	BNE	LocA6D
-	MOV	A, $2F4+X
-	MOV	$2E4+X, A
-	MOV	A, $2D4+X
+	MOV	t_TremLen+X, A
+	BNE	FinishTremolo
+	MOV	A, TremLen+X
+	MOV	t_TremLen+X, A
+	MOV	A, TremDelta+X
 	EOR	A, #-1
 	INC	A
-	MOV	$2D4+X, A
-LocA6D:
-	RET
-;-----------------------------------------------------------------------------
-EndOfTrack:	; $A6E
-	MOV	X, CurrentTrack
-	CALL	SoftKeyRelease
+	MOV	TremDelta+X, A
+FinishTremolo:
+	CLR0	DSPAddr
+	SET1	DSPAddr
+
 	MOV	A, #0
-	MOV	$110+X, A
-	MOV	$150+X, A
+	MOV	Y, A
+	MOVW	0, YA	; Set the initial delta to 0.
+
+	MOV	A, t_PitchSlideDelay+X
+	BEQ	loc_9DA
+	CMP	A, #-1
+	BEQ	loc_A39		; Branch if pitch slide finished.
+	DEC	A
+	MOV	t_PitchSlideDelay+X, A
+	BNE	loc_A39
+	MOV	A, #1
+	MOV	t_PitchSlideTimer+X, A
+loc_9DA:
+	DEC	t_PitchSlideTimer+X
+	BNE	loc_A39
+	MOV	A, PitchSlideInterval+X
+	MOV	t_PitchSlideTimer+X, A
+
+	;MOV	Y, #0
+	MOV	A, t_PitchSlideStepsDown+X
+	BEQ	+
+	DEC	A
+	MOV	t_PitchSlideStepsDown+X, A
+
+	MOV	A, PitchSlideDelta+X	; get pitch offset
+	EOR	A, #-1		; negate it
+	INC	A
+	JMP	++
+; -----------------------------------------------------------------------------
++	MOV	A, PitchSlideDelta+X
+++	BPL	+		; sign-extend it
+	DEC	Y
++	MOVW	0, YA	; Store the delta.
+
+	DEC	t_PitchSlideSteps+X
+	BNE	loc_A39
+	MOV	A, #-1
+	MOV	t_PitchSlideDelay+X, A
+
+loc_A39:
+	MOV	A, t_VibDelay+X
+	BEQ	loc_A48
+	DEC	A
+	MOV	t_VibDelay+X, A
+	JMP	loc_AB4
+; -----------------------------------------------------------------------------
+loc_A48:
+	DEC	t_VibTimer+X
+	BNE	loc_AB4
+	MOV	A, VibInterval+X
+	MOV	t_VibTimer+X, A
+
+	MOV	Y, #0
+	MOV	A, VibDelta+X
+	BPL	+
+	DEC	Y
++	ADDW	YA, 0
+	MOVW	0, YA
+	
+	DEC	t_VibSteps+X
+	BNE	loc_AB4
+	MOV	A, VibLen+X
+	MOV	t_VibSteps+X, A
+	MOV	A, VibDelta+X
+	EOR	A, #-1
+	INC	A
+	MOV	VibDelta+X, A
+loc_AB4:
+	; Now add the delta to the current pitch value at the DSP.
+	; Limit the pitch to the valid range of $0000..$3FFF.
+	MOV	A, 1
+	CLRC
+	ADC	DSPData, 0
+	INC	DSPAddr
+	ADC	A, DSPData
+	BMI	.minus
+	CMP	A, #$40
+	BCS	+		; branch if pitch is out of range
+	MOV	DSPData, A
+	RET
+; -----------------------------------------------------------------------------
+	; Set the maximum possible pitch.
++	MOV	DSPData, #$3F
+	DEC	DSPAddr
+	MOV	DSPData, #$FF
+	RET
+; -----------------------------------------------------------------------------
+	; Set the minimum possible pitch.
+.minus:
+	MOV	DSPData, #0
+	DEC	DSPAddr
+	MOV	DSPData, #0
+	SETC
+	RET
+; =============================================================================
+EndOfTrack:
+	MOV	X, CurrentTrack
+	BBS5	TempFlags, +
+	CALL	SoftKeyRelease2
+	BBC7	TempFlags, +
+	MOV	A, CurVoiceAddr
+	OR	A, #8
+	MOV	DSPAddr, A
+	MOV	A, DSPData
+	BNE	.ret	; if the channel is still audible, we will come back here later
++	AND	TempFlags, #$20
 	CMP	X, #8
-	BCC	LocAB7
-	MOV	$1A0-8+X, A
-	MOV	DSPAddr, #DSP_NoiseOn
-	MOV	A, VoiceBitTable+X
-	TCLR	DSPData, A
+	BCC	.ret
+	MOV	A, SndFlags-8+X
+	AND	A, #$DF
+	MOV	SndFlags-8+X, A
 
-LocAB7:
-	BBS4	GlobalFlags, +
-	RET
-
-+	JMP	GetMessage
-;-----------------------------------------------------------------------------
+.ret:	BBS3	GlobalFlags, +
+	JMP	FinishTrackUpdate
+; -----------------------------------------------------------------------------
++	MOV	A, TempFlags
+	MOV	SndFlags+X, A
+	JMP	GetMessage
+; =============================================================================
 SetVoice:	; $ABA
-	MOV	A, (1)+Y
-	MOV	X, A
-	MOV	A, TimbreLUT+X
 	MOV	X, CurrentTrack
-	MOV	$244+X, A
+	MOV	A, (0)+Y
+	MOV	SndTimbre+X, A	; Store the logical instrument index.
 	MOV	A, #0
-	MOV	FineTune+X, A
+	MOV	SndFineTune+X, A
 	JMP	IncAndFinishEvent
 ;-----------------------------------------------------------------------------
 SetVolume:	; $AE3
 	MOV	X, CurrentTrack
-	MOV	A, (1)+Y
-	MOV	$254+X, A
+	MOV	A, (0)+Y
+	MOV	SndVol_L+X, A
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$264+X, A
+	MOV	A, (0)+Y
+	MOV	SndVol_R+X, A
 	JMP	IncAndFinishEvent
 ;-----------------------------------------------------------------------------
 JumpTrack:	; $B14
-	MOV	A, (1)+Y	; LSB
-	MOV	3, A
-	INC	Y
-	MOV	A, (1)+Y	; MSB
+	MOV	A, (0)+Y	; LSB
 	MOV	2, A
-	MOV	1, 3
+	INC	Y
+	MOV	A, (0)+Y	; MSB
+	MOV	1, A
+	MOV	0, 2
 	MOV	Y, #0
 	JMP	FinishEvent
 ;-----------------------------------------------------------------------------
 CallSub:	; $B29
-	MOV	X, CurrentTrack
-
-	MOV	A, (1)+Y	; repeat count
-	MOV	3, A
+	MOV	A, (0)+Y	; repeat count
+	MOV	2, A
 	INC	Y
 
 	MOV	A, Y
 	MOV	Y, #0
-	ADDW	YA, 1
-	MOVW	4, YA
+	ADDW	YA, 0
+	MOVW	3, YA
 
+	MOV	X, CurrentTrack
 	MOV	Y, SndStackPtr+X
-	MOV	$334+Y, A
-	MOV	A, 5
-	MOV	$3B4+Y, A
-	MOV	A, 3
-	MOV	$434+Y, A
+	MOV	Stack_PtrL+Y, A
+	MOV	A, 4
+	MOV	Stack_PtrH+Y, A
+	MOV	A, 2
+	MOV	Stack_RepCnt+Y, A
 	INC	SndStackPtr+X
 
 	MOV	Y, #1
-	MOV	A, (4)+Y	; MSB
-	MOV	2, A
-	DEC	Y
-	MOV	A, (4)+Y	; LSB
+	MOV	A, (3)+Y	; MSB
 	MOV	1, A
+	DEC	Y
+	MOV	A, (3)+Y	; LSB
+	MOV	0, A
 	JMP	FinishEvent
 ;-----------------------------------------------------------------------------
 RetSub:	; $B5E
@@ -1009,210 +938,182 @@ RetSub:	; $B5E
 
 	MOV	Y, SndStackPtr+X
 	DEC	Y
-	MOV	A, $334+Y	; LSB
+	MOV	A, Stack_PtrL+Y	; LSB
+	MOV	0, A
+	MOV	A, Stack_PtrH+Y	; MSB
 	MOV	1, A
-	MOV	A, $3B4+Y	; MSB
-	MOV	2, A
 
-	MOV	A, $434+Y
-	DEC	A
+	MOV	A, Stack_RepCnt+Y
+	DEC	A	; decrement repeat count
 	BEQ	+
-	MOV	$434+Y, A	; decrement repeat count
+	MOV	Stack_RepCnt+Y, A
 
+	; Repeat the subroutine.
 	MOV	Y, #1
-	MOV	A, (1)+Y	; MSB
-	MOV	3, A
+	MOV	A, (0)+Y	; MSB
+	MOV	2, A
 	DEC	Y
-	MOV	A, (1)+Y	; LSB
-	MOV	1, A
-	MOV	2, 3
+	MOV	A, (0)+Y	; LSB
+	MOV	0, A
+	MOV	1, 2
 	JMP	FinishEvent
-
-+
-	MOV	SndStackPtr+X, Y
+; -----------------------------------------------------------------------------
++	MOV	SndStackPtr+X, Y
 	MOV	Y, #2
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 DefaultDurOn:	; $BA4
 	MOV	X, CurrentTrack
-
-	MOV	A, (1)+Y
-	MOV	$120+X, A
-	MOV	A, $190+X
-	BEQ	+
-	MOV	A, $120+X
-	MOV	$130+X, A
+	MOV	A, (0)+Y
+	BBC1	TempFlags, +
+	MOV	DfltNoteDur_H+X, A
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$120+X, A
-+	; $BC3
+	MOV	A, (0)+Y
++	MOV	DfltNoteDur_L+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 DefaultDurOff:	; $BC9
 	MOV	X, CurrentTrack
 	MOV	A, #0
-	MOV	$120+X, A
-	MOV	$130+X, A
+	MOV	DfltNoteDur_L+X, A
+	MOV	DfltNoteDur_H+X, A
 	JMP	FinishEvent
 ;-----------------------------------------------------------------------------
 PitchSlideUp:	; $BD5
 	MOV	X, CurrentTrack
-	MOV	A, $150+X
-	OR	A, #1
-	MOV	$150+X, A
-
-	MOV	A, (1)+Y	; delay
-	MOV	$1B0+X, A
+	MOV	A, (0)+Y	; delay
+	MOV	PitchSlideDelay+X, A
 	INC	Y
-	MOV	A, (1)+Y	; interval
-	MOV	$1C0+X, A
+	MOV	A, (0)+Y	; interval
+	MOV	PitchSlideInterval+X, A
 	INC	Y
-	MOV	A, (1)+Y	; length
-	MOV	$1D0+X, A
+	MOV	A, (0)+Y	; length
+	MOV	PitchSlideSteps+X, A
 	INC	Y
-	MOV	A, (1)+Y	; delta
-	MOV	$170+X, A
+	MOV	A, (0)+Y	; delta
+	MOV	PitchSlideDelta+X, A
 	INC	Y
-	MOV	A, (1)+Y	; opposite direction length
-	MOV	$1E0+X, A
+	MOV	A, (0)+Y	; opposite direction length
+	MOV	PitchSlideStepsDown+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 PitchSlideDown:	; $C09
 	MOV	X, CurrentTrack
-	MOV	A, $150+X
-	OR	A, #1
-	MOV	$150+X, A
-
-	MOV	A, (1)+Y
-	MOV	$1B0+X, A
+	MOV	A, (0)+Y	; delay
+	MOV	PitchSlideDelay+X, A
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$1C0+X, A
+	MOV	A, (0)+Y	; interval
+	MOV	PitchSlideInterval+X, A
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$1D0+X, A
+	MOV	A, (0)+Y	; length
+	MOV	PitchSlideSteps+X, A
 	INC	Y
-	MOV	A, (1)+Y
+	MOV	A, (0)+Y	; delta
 	EOR	A, #-1
 	INC	A
-	MOV	$170+X, A
+	MOV	PitchSlideDelta+X, A
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$1E0+X, A
+	MOV	A, (0)+Y	; opposite direction length
+	MOV	PitchSlideStepsDown+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 PitchSlideOff:	; $C40
 	MOV	X, CurrentTrack
-	MOV	A, $150+X
-	AND	A, #-2
-	MOV	$150+X, A
+	MOV	A, #0
+	MOV	PitchSlideDelta+X, A
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
-SetTempo:	; $C56
-	MOV	A, (1)+Y
+; =============================================================================
+SetTempo:	; $DEB
+	MOV	A, (0)+Y
 	MOV	BGMTempo, A
 	CALL	TempoToInterval
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
-AddTempo:	; $C6B
-	MOV	A, (1)+Y
+; =============================================================================
+AddTempo:	; $DF8
+	MOV	A, (0)+Y
 	CLRC
 	ADC	A, BGMTempo
 	MOV	BGMTempo, A
 	CALL	TempoToInterval
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 Vibrato2:	; $C78
 	MOV	X, CurrentTrack
-	MOV	A, $150+X
-	OR	A, #2
-	MOV	$150+X, A
-
-	MOV	A, (1)+Y
-	MOV	$200+X, A
+	MOV	A, (0)+Y
+	MOV	VibLen+X, A	; vibrato cycle length
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$210+X, A
+	MOV	A, (0)+Y
+	MOV	VibInterval+X, A	; step interval
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$234+X, A
+	MOV	A, (0)+Y
+	MOV	VibDelta+X, A	; pitch delta
 	MOV	A, #0
-	MOV	$220+X, A
+	MOV	VibDelay+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 VibratoOff:	; $CA5
 	MOV	X, CurrentTrack
-	MOV	A, $150+X
-	AND	A, #-3
-	MOV	$150+X, A
+	MOV	A, #0
+	MOV	VibDelta+X, A
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 Vibrato:	; $CB1
 	MOV	X, CurrentTrack
-	MOV	A, $150+X
-	OR	A, #2
-	MOV	$150+X, A
-
-	MOV	A, (1)+Y	; length
-	MOV	$200+X, A
+	MOV	A, (0)+Y
+	MOV	VibLen+X, A	; vibrato cycle length
 	INC	Y
-	MOV	A, (1)+Y	; interval
-	MOV	$210+X, A
+	MOV	A, (0)+Y
+	MOV	VibInterval+X, A	; step interval
 	INC	Y
-	MOV	A, (1)+Y	; depth
-	MOV	$234+X, A
+	MOV	A, (0)+Y
+	MOV	VibDelta+X, A	; pitch delta
 	INC	Y
-	MOV	A, (1)+Y	; delay
-	MOV	$220+X, A
+	MOV	A, (0)+Y
+	MOV	VibDelay+X, A	; delay
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 SetADSR:	; $CDF
 	MOV	X, CurrentTrack
-
-	MOV	A, (1)+Y
-	MOV	$274+X, A
+	MOV	A, (0)+Y
+	MOV	SndADSR1+X, A ; ADSR 1
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$284+X, A
+	MOV	A, (0)+Y
+	MOV	SndADSR2+X, A ; ADSR 2
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
-SetMasterVolume:	; $CF9
-	INC	Y
-	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 SetTuning:	; $D32
 	MOV	X, CurrentTrack
-	MOV	A, (1)+Y
-	MOV	FineTune+X, A
+	MOV	A, (0)+Y
+	MOV	SndFineTune+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 SetTranspose:	; $D45
 	MOV	X, CurrentTrack
-	MOV	A, (1)+Y
-	MOV	$140+X, A
+	MOV	A, (0)+Y
+	MOV	Transpose+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 AddTranspose:	; $D59
 	MOV	X, CurrentTrack
-	MOV	A, (1)+Y
+	MOV	A, (0)+Y
 	CLRC
-	ADC	A, $140+X
-	MOV	$140+X, A
+	ADC	A, Transpose+X
+	MOV	Transpose+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 SetEchoParams:	; $D71
 	MOV	DSPAddr, #DSP_Feedback
-	MOV	A, (1)+Y
+	MOV	A, (0)+Y
 	MOV	DSPData, A
 	INC	Y
 
 	MOV	DSPAddr, #DSP_EchoL
-	MOV	A, (1)+Y
+	MOV	A, (0)+Y
 	MOV	DSPData, A
 	INC	Y
 
 	MOV	DSPAddr, #DSP_EchoR
-	MOV	A, (1)+Y
+	MOV	A, (0)+Y
 	MOV	DSPData, A
 	JMP	IncAndFinishEvent
 
@@ -1223,31 +1124,27 @@ SetEchoParams:	; $D71
 	;JMP	FinishEvent
 ;-----------------------------------------------------------------------------
 EchoOn:		; $DA0
-	MOV	X, CurrentTrack
-	MOV	A, #1
-	MOV	$294+X, A
+	SET2	TempFlags
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 EchoOff:	; $DBB
-	MOV	X, CurrentTrack
-	MOV	A, #0
-	MOV	$294+X, A
+	CLR2	TempFlags
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 SetFIR:		; $DD8
 	MOV	DSPAddr, #DSP_FIR
--
-	MOV	A, (1)+Y
+	CLRC
+
+-	MOV	A, (0)+Y
 	MOV	DSPData, A
 	INC	Y
-	CLRC
 	ADC	DSPAddr, #$10
 	BPL	-
 
 	JMP	FinishEvent
 ;-----------------------------------------------------------------------------
 SetNoise:	; $DF8
-	MOV	A, (1)+Y
+	MOV	A, (0)+Y
 	;MOV	NoiseShadow, A
 	;OR	A, DSPFlagShadow
 	MOV	DSPAddr, #DSP_Flags
@@ -1255,152 +1152,94 @@ SetNoise:	; $DF8
 	JMP	IncAndFinishEvent
 ;-----------------------------------------------------------------------------
 NoiseOn:	; $E12
-	MOV	X, CurrentTrack
-	MOV	DSPAddr, #DSP_NoiseOn
-	MOV	A, VoiceBitTable+X
-	TSET	DSPData, A
+	SET3	TempFlags
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 NoiseOff:	; $E2A
-	MOV	X, CurrentTrack
-	MOV	DSPAddr, #DSP_NoiseOn
-	MOV	A, VoiceBitTable+X
-	TCLR	DSPData, A
+	CLR3	TempFlags
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 PitchSlideDown2:	; $EA7
 	MOV	X, CurrentTrack
-	MOV	A, $150+X
-	OR	A, #1
-	MOV	$150+X, A
-
-	MOV	A, (1)+Y
-	MOV	$1B0+X, A
+	MOV	A, (0)+Y ; delay
+	MOV	PitchSlideDelay+X, A
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$1C0+X, A
+	MOV	A, (0)+Y ; portamento interval
+	MOV	PitchSlideInterval+X, A
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$1E0+X, A
+	MOV	A, (0)+Y ; portamento steps
+	MOV	PitchSlideStepsDown+X, A
 	ASL	A
-	MOV	$1D0+X, A
+	MOV	PitchSlideSteps+X, A
 	INC	Y
-	MOV	A, (1)+Y
+	MOV	A, (0)+Y ; pitch delta
 	EOR	A, #-1
 	INC	A
-	MOV	$170+X, A
+	MOV	PitchSlideDelta+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 PitchSlideUp2:	; $EDC
 	MOV	X, CurrentTrack
-	MOV	A, $150+X
-	OR	A, #1
-	MOV	$150+X, A
-
-	MOV	A, (1)+Y
-	MOV	$1B0+X, A
+	MOV	A, (0)+Y ; delay
+	MOV	PitchSlideDelay+X, A
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$1C0+X, A
+	MOV	A, (0)+Y ; portamento interval
+	MOV	PitchSlideInterval+X, A
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$1E0+X, A
+	MOV	A, (0)+Y ; portamento steps
+	MOV	PitchSlideStepsDown+X, A
 	ASL	A
-	MOV	$1D0+X, A
+	MOV	PitchSlideSteps+X, A
 	INC	Y
-	MOV	A, (1)+Y
-	MOV	$170+X, A
+	MOV	A, (0)+Y ; pitch delta
+	MOV	PitchSlideDelta+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 VoiceAndVolume:	; $F0E
-	MOV	A, (1)+Y
-	MOV	X, A
-	MOV	A, TimbreLUT+X
 	MOV	X, CurrentTrack
-	MOV	$244+X, A
+	MOV	A, (0)+Y
+	MOV	SndTimbre+X, A	; Store the logical instrument index.
+	INC	Y
+	MOV	A, (0)+Y
+	MOV	SndVol_L+X, A
+	INC	Y
+	MOV	A, (0)+Y
+	MOV	SndVol_R+X, A
 	MOV	A, #0
-	MOV	FineTune+X, A
-	INC	Y
-
-	MOV	A, (1)+Y
-	MOV	$254+X, A
-	INC	Y
-	MOV	A, (1)+Y
-	MOV	$264+X, A
-	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
-SetTimerFreq:	; $F60
+	MOV	SndFineTune+X, A
 	JMP	IncAndFinishEvent
 ;-----------------------------------------------------------------------------
 LongNoteOn:	; $F72
-	MOV	X, CurrentTrack
-	MOV	A, #1
-	MOV	$190+X, A
+	SET1	TempFlags
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 LongNoteOff:	; $F82
-	MOV	X, CurrentTrack
-	MOV	A, #0
-	MOV	$190+X, A
+	CLR1	TempFlags
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
-CondJump:	; $F92
-	MOV	A, Y
-	MOV	Y, #0
-	ADDW	YA, 1
-	MOVW	3, YA
-
-	MOV	A, BGMSwitch
-	ASL	A
-	INC	A
-	MOV	Y, A
-
-	MOV	A, (3)+Y
-	MOV	1, A
-	INC	Y
-	MOV	A, (3)+Y
-	MOV	2, A
-	MOV	Y, #0
-	JMP	FinishEvent
-;-----------------------------------------------------------------------------
-SetJumpCond:	; $FAC
-	MOV	A, (1)+Y
-	MOV	BGMSwitch, A
-	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 SetTremolo:	; $FBE
 	MOV	X, CurrentTrack
-	MOV	A, $150+X
-	OR	A, #4
-	MOV	$150+X, A
-
-	MOV	A, (1)+Y	; length
-	MOV	$2F4+X, A
+	MOV	A, (0)+Y	; length
+	MOV	TremLen+X, A
 	INC	Y
-	MOV	A, (1)+Y	; interval
-	MOV	$2C4+X, A
+	MOV	A, (0)+Y	; interval
+	MOV	TremInterval+X, A
 	INC	Y
-	MOV	A, (1)+Y	; depth
-	MOV	$2D4+X, A
+	MOV	A, (0)+Y	; depth
+	MOV	TremDelta+X, A
 	INC	Y
-	MOV	A, (1)+Y	; delay
-	MOV	$304+X, A
-	MOV	A, $254+X
-	MOV	$314+X, A
-	MOV	A, $264+X
-	MOV	$324+X, A
+	MOV	A, (0)+Y	; delay
+	MOV	TremDelay+X, A
 	JMP	IncAndFinishEvent
 ;-----------------------------------------------------------------------------
 TremoloOff:	; $FF8
 	MOV	X, CurrentTrack
-	MOV	A, $150+X
-	AND	A, #$FB
-	MOV	$150+X, A
+	MOV	A, #0
+	MOV	TremDelta+X, A
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
-VoiceBitTable:	; $1004
-	db	1, 2, 4, 8, $10, $20, $40, $80	; for BGM
-	db	1, 2, 4, 8, $10, $20, $40, $80	; for SFX
+; =============================================================================
+VoiceBitMask:	; $1004
+	db	1, 2, 4, 8, $10, $20, $40, $80
 TrackEventTable:	; $1014
 	; See https://loveemu.hatenablog.com/entry/20130819/SNES_Rare_Music_Spec for details
 	dw	EndOfTrack	; $A6E	; individual effect
@@ -1429,8 +1268,8 @@ TrackEventTable:	; $1014
 	dw	EchoOff		; $DBB	; individual effect (no rest required)
 	dw	SetFIR		; $DD8	; global effect
 	dw	SetNoise	; $DF8	; global effect
-	dw	NoiseOn		; $E12	; individual effect
-	dw	NoiseOff	; $E2A	; individual effect
+	dw	NoiseOn		; $E12	; individual effect (no rest required)
+	dw	NoiseOff	; $E2A	; individual effect (no rest required)
 	dw	0	; global effect
 	dw	0	; global effect
 	dw	0	; global effect
@@ -1448,10 +1287,11 @@ TrackEventTable:	; $1014
 	dw	SetTimerFreq	; $F60	; individual effect (no rest required)
 	dw	LongNoteOn	; $F72	; individual effect (no rest required)
 	dw	LongNoteOff	; $F82	; individual effect (no rest required)
-	dw	CondJump	; $F92	; global effect
-	dw	SetJumpCond	; $FAC	; global effect
+	dw	0	; global effect
+	dw	SetJumpCond	; $FAC	; individual effect (no rest required)
 	dw	SetTremolo	; $FBE	; individual effect
 	dw	TremoloOff	; $FF8	; individual effect
+; =============================================================================
 EventTypeTable:
 	db	1	; individual effect
 	db	-1	; individual effect (no rest required)
@@ -1479,8 +1319,8 @@ EventTypeTable:
 	db	-1	; individual effect (no rest required)
 	db	0	; global effect
 	db	0	; global effect
-	db	1	; individual effect
-	db	1	; individual effect
+	db	-1	; individual effect (no rest required)
+	db	-1	; individual effect (no rest required)
 	db	0	; global effect
 	db	0	; global effect
 	db	0	; global effect
@@ -1499,36 +1339,18 @@ EventTypeTable:
 	db	-1	; individual effect (no rest required)
 	db	-1	; individual effect (no rest required)
 	db	0	; global effect
-	db	0	; global effect
+	db	-1	; individual effect (no rest required)
 	db	1	; individual effect
 	db	1	; individual effect
-;-----------------------------------------------------------------------------
-WaitForEcho:
-	MOV	A, #1
-	MOV	$8700, A
--	MOV	A, $8700
-	BNE	-
-	RET
 ;-----------------------------------------------------------------------------
 SetUpEngine:	; $1076
 	MOV	A, #0
-	BBC3	GlobalFlags, +	; skip some init on warm reset
+	BBC4	GlobalFlags, +	; skip some init on warm reset
 
 	MOV	DSPAddr, #$D	; echo feedback
-	MOV	DSPData, A
+	MOV	DSPData, A	; = 0
 	MOV	DSPAddr, #$4D	; echo enable
-	MOV	DSPData, A
-
-	MOV	DSPAddr, #$7D	; echo delay
-	MOV	DSPData, A	; set the echo delay to 0 ms
-	MOV	DSPAddr, #$6D	; echo buffer location
-	MOV	DSPData, #$87	; = $8700..$8703
-
-	MOV	DSPAddr, #DSP_Flags
-	MOV	DSPData, #$C0
-	CALL	WaitForEcho
-	CALL	WaitForEcho
-	; Here, A equals 0
+	MOV	DSPData, A	; = 0
 
 	MOV	DSPAddr, #$6D	; echo buffer location
 	MOV	DSPData, #$DF	; = $DF00..$FEFF
@@ -1536,24 +1358,24 @@ SetUpEngine:	; $1076
 	MOV	DSPData, #4	; set the echo delay to 4*16=64 ms
 
 	MOV	DSPAddr, #$C	; master left volume
-	MOV	DSPData, #64
+	MOV	DSPData, #64	; = 64
 	MOV	DSPAddr, #$1C	; master right volume
-	MOV	DSPData, #64
+	MOV	DSPData, #64	; = 64
 	MOV	DSPAddr, #$2D	; pitch modulation
-	MOV	DSPData, A
+	MOV	DSPData, A	; = 0
 	MOV	DSPAddr, #$5D	; source directory (instrument table)
 	MOV	DSPData, #$32	; =$3200
 
 	MOV	Timer0, #1
 	MOV	Timer1, #20	; 2.5 ms | 400 Hz
-	MOV	HWControl, #3
+	MOV	ControlReg, #3
 
 +	MOV	DSPAddr, #$2C	; echo left volume
 	MOV	DSPData, A	; ...is set to 0
 	MOV	DSPAddr, #$3C	; echo right volume
 	MOV	DSPData, A	; ...is set to 0
-	MOV	DSPAddr, #$3D	; noise enable
-	MOV	DSPData, A
+	;MOV	DSPAddr, #$3D	; noise enable
+	;MOV	DSPData, A
 	MOV	DSPAddr, #DSP_Flags
 	MOV	DSPData, A
 
@@ -1562,110 +1384,119 @@ SetUpEngine:	; $1076
 	MOV	Timer1Ticks, A
 	MOV	SFXDivCounter, #1
 	MOV	MiscDivCounter, #1
-	MOV	KeyOnShadow, A
-	MOV	BGMSwitch, A
+	MOV	CurPreprocTrack, A
 
-	MOV	1, #8
+	MOV	0, #8
 	MOV	X, A
 	MOV	Y, A
-	MOV	2, Y
+	MOV	1, Y
 
-	; $1128
 -	MOV	A, #1
-	MOV	NoteLen_L+X, A
-	MOV	$110+X, A
+	MOV	NoteDur_L+X, A	; set delay duration to 1
+	MOV	SndFlags+X, A
 	MOV	A, MusicData+Y
-	MOV	TrackPtr_L+X, A
+	MOV	TrkPtr_L+X, A
 	MOV	A, MusicData+1+Y
-	MOV	TrackPtr_H+X, A
-	MOV	A, 2
+	MOV	TrkPtr_H+X, A
+	MOV	A, 1
 	MOV	SndStackPtr+X, A
 	MOV	A, #0
-	MOV	$190+X, A
-	MOV	NoteLen_H+X, A
-	MOV	$120+X, A
-	MOV	$130+X, A
-	MOV	$150+X, A
-	MOV	FineTune+X, A
-	MOV	$140+X, A
-	MOV	$1A0+X, A
-	MOV	$294+X, A
-	MOV	$110+8+X, A
+	MOV	NoteDur_H+X, A
+	MOV	DfltNoteDur_L+X, A
+	MOV	DfltNoteDur_H+X, A
+	MOV	SndFlags+8+X, A
+	MOV	Transpose+X, A
+	MOV	SndFineTune+X, A
+	MOV	PitchSlideDelta+X, A
+	MOV	VibDelta+X, A
+	MOV	TremDelta+X, A
+	; set ADSR to $8E-$C1
 	MOV	A, #$8E
-	MOV	$274+X, A
+	MOV	SndADSR1+X, A
 	MOV	A, #$C1
-	MOV	$284+X, A
+	MOV	SndADSR2+X, A
 
 	INC	X
 	INC	Y
 	INC	Y
 	CLRC
-	ADC	2, #8
-	DBNZ	1, -
+	ADC	1, #8
+	DBNZ	0, -
 
 	MOV	A, MusicData+16
 	MOV	BGMTempo, A
+
+; Convert BGM tempo at register A to a timer period.
+; Period=25600/Tempo
 TempoToInterval:
-	CLR1	GlobalFlags
-	PUSH	Y
+	CLR1	GlobalFlags	; Clear the "halve BGM tempo" flag.
+	MOV	2, Y	; Preserve Y.
 	MOV	X, A
 	MOV	A, #0
 	MOV	Y, #$64	; YA = 25600
 	DIV	YA, X
-	BVC	+	; branch if the quotient is <256
+	BVC	+	; branch if quotient < 256
 	SETC
 	ROR	A	; A = (A >> 1) | $80
-	SET1	GlobalFlags
+	SET1	GlobalFlags	; Clear the "halve BGM tempo" flag.
 +	MOV	Timer0, A
-	POP	Y
+	MOV	Y, 2
 	RET
-;-----------------------------------------------------------------------------
+; =============================================================================
 PlaySFX:	; $1178
 	ASL	A
-	PUSH	A
-	CALL	SoftKeyRelease2
-	MOV	A, #1
-	MOV	$1A0+X, A
-	MOV	A, $150+X
+	MOV	Y, A
+
+	MOV	A, X
+	XCN	A
+	CALL	SoftKeyRelease3
+
+	MOV	A, SndFlags+X
+	OR	A, SndFlags+8+X
+	AND	A, #$81
+	OR	A, #1
+	MOV	SndFlags+8+X, A
+
+	MOV	A, SndFlags+X
 	AND	A, #$3F
-	MOV	$150+X, A
-	MOV	DSPAddr, #DSP_NoiseOn
-	MOV	A, VoiceBitTable+X
-	TCLR	DSPData, A
+	OR	A, #$20
+	MOV	SndFlags+X, A
+
 	MOV	A, X
 	OR	A, #8
-	MOV	X, A
 	ASL	A
 	ASL	A
 	ASL	A
-	MOV	SndStackPtr+X, A
-	MOV	A, #1
-	MOV	$110+X, A
+	MOV	SndStackPtr+8+X, A	; store stack pointer
 	MOV	A, #0
-	MOV	$120+X, A
-	MOV	$130+X, A
-	MOV	NoteLen_H+X, A
-	MOV	$190+X, A
-	MOV	$1A0+X, A
-	MOV	$150+X, A
-	MOV	$140+X, A
-	MOV	FineTune+X, A
-	MOV	$274+X, A
-	MOV	$284+X, A
-	MOV	$294+X, A
+	MOV	DfltNoteDur_L+8+X, A
+	MOV	DfltNoteDur_H+8+X, A
+	MOV	NoteDur_H+8+X, A
+	MOV	Transpose+8+X, A
+	MOV	SndFineTune+8+X, A
+	MOV	PitchSlideDelta+8+X, A
+	MOV	VibDelta+8+X, A
+	MOV	TremDelta+8+X, A
+
+	; set center volume to 127
 	MOV	A, #127
-	MOV	$254+X, A
-	MOV	$264+X, A
-	MOV	$314+X, A
-	MOV	$324+X, A
-	POP	Y
+	MOV	SndVol_L+8+X, A
+	MOV	SndVol_R+8+X, A
+
+	; set ADSR to $8E-$C1
+	MOV	A, #$8E
+	MOV	SndADSR1+8+X, A
+	MOV	A, #$C1
+	MOV	SndADSR2+8+X, A
+
+	; set track pointer
 	MOV	A, SFXData+Y
-	MOV	TrackPtr_L+X, A
+	MOV	TrkPtr_L+8+X, A
 	INC	Y
 	MOV	A, SFXData+Y
-	MOV	TrackPtr_H+X, A
+	MOV	TrkPtr_H+8+X, A
 	MOV	A, #2
-	MOV	NoteLen_L+X, A
+	MOV	NoteDur_L+8+X, A
 	RET
 ;-----------------------------------------------------------------------------
 PitchTable:	; $11E6
