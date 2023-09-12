@@ -438,18 +438,6 @@ SoftKeyRelease3:
 	MOV	SndEnvLvl+X, A
 +	RET
 ; =============================================================================
-WriteKeyOn:
-	MOV	A, KeyOnShadow
-	BEQ	+
-	MOV	DSPAddr, #$5C
-	TCLR	DSPData, A
-	MOV	DSPAddr, #$4C
-	MOV	DSPData, A
-	MOV	Y, #26
--	DBNZ	Y, -	; short delay as a workaround for buggy SNES emulators
-	MOV	KeyOnShadow, Y
-+	RET
-; =============================================================================
 UpdateTracks:
 	; Initialise variables for channel #0.
 	MOV	CurVoiceBit, #1
