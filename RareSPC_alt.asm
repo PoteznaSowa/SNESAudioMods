@@ -34,12 +34,13 @@ PrevMsg:		skip 1
 ; 4: monaural mode
 GlobalFlags:	skip 1
 
+CurPreprocTrack:	skip 1	; number of channel to be preprocessed
+
 BGMTempo:	skip 1
 Timer0Ticks:	skip 1
 Timer1Ticks:	skip 1
 SFXDivCounter:		skip 1	; must be 1..8
 MiscDivCounter:		skip 1	; must be 1..5
-CurPreprocTrack:	skip 1	; number of channel to be preprocessed
 
 	ORG	$20
 
@@ -162,22 +163,23 @@ DSP_EchoLoc =	$6D
 DSP_EchoDelay =	$7D
 DSP_FIR =	$0F
 
+; External data locations.
 SoundEntryPnt =		$5E8
 MusicData =		$12A0
 SFXData	=		$2380
+SourceDir =		$3200
 
 	arch spc700
 	optimize dp always
 
 	ORG	$8AA342
 	base	$4B8
-;-----------------------------------------------------------------------------
-	MOV	PrevMsg, Port0
+; -----------------------------------------------------------------------------
+	MOV	Y, Port0
 	SET4	GlobalFlags
 	MOV	X, #0			; clear X
 	MOV	DSPAddr, #$7D
 	MOV	DSPData, X		; set the echo delay to 0 ms
-	MOV	Y, PrevMsg		; read previous message
 TransferMode:
 -	CMP	Y, Port0		; has SNES sent next data?
 	BEQ	-			; repeat if not
@@ -188,20 +190,20 @@ TransferMode:
 	MOV	(Port2+X), A		; store it at the address from IOPort2
 	MOV	Port0, Y		; reply to SNES
 	JMP	-			; retry
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 +	MOV	Port0, Y
 	MOV	PrevMsg, Y
 
 	;MOV	PrevMsg, Y		; store previous message
 	;JMP	(Port2+X)		; run program at the address from IOPort2
 	JMP	ProgramStart
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 	;rep 4 : db 0
-	rep 9 : db 0	; must be at least 8
-;-----------------------------------------------------------------------------
+	rep 12 : db 0	; must be at least 8
+; -----------------------------------------------------------------------------
 TimbreLUT:
 	rep 256 : db 0
-;-----------------------------------------------------------------------------
+; =============================================================================
 ProgramStart:
 	MOV	Port1, #$FF	; indicate for SNES that engine is ready
 	MOV	X, #$F
@@ -209,13 +211,14 @@ ProgramStart:
 	CALL	SetUpEngine
 
 GetMessage:	; $606
-	MOV	Y, Port0	; read message ID
-	CMP	Y, PrevMsg	; has SNES sent next message?
+	CMP	Port0, PrevMsg	; has SNES sent next message?
 	BEQ	MainLoop	; branch if no
-	MOV	A, Port1	; read first byte of message
-	MOV	X, Port2	; read second byte of message
+	MOV	A, Port1	; read message
+	MOV	X, Port2
+	MOV	Y, Port0	; read messsage ID again
 	MOV	Port0, Y	; reply to SNES
 	MOV	PrevMsg, Y	; store message ID
+	CLR4	CurPreprocTrack
 
 	CMP	A, #$FF
 	BEQ	GotoTransferMode
@@ -229,12 +232,12 @@ GetMessage:	; $606
 	; play SFX
 	CALL	PlaySFX
 	JMP	GetMessage
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 ;SetBGMSwitch:
 ;SetMonoFlag:
 ;	JMP	GetMessage
 ;	JMP	GetMessage
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 GotoTransferMode:	; $71F
 	MOV	X, #0
 	MOV	Port1, X
@@ -243,12 +246,15 @@ GotoTransferMode:	; $71F
 	MOV	DSPAddr, #$D	; echo feedback
 	MOV	DSPData, X
 	JMP	TransferMode
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 StartSound:	; $643
+	MOV	ControlReg, #0
 	SET0	GlobalFlags
-	MOVW	YA, Timer0_out
+	CALL	TempoToInterval2
+	MOV	Timer1, #20
+	MOV	ControlReg, #3
 	JMP	GetMessage
-;-----------------------------------------------------------------------------
+; =============================================================================
 MainLoop:	; $649
 	BBC0	GlobalFlags, PreprocessTracks
 
@@ -266,6 +272,7 @@ MainLoop:	; $649
 
 ++	DEC	Timer0Ticks
 	EOR	GlobalFlags, #4
+	CLR4	CurPreprocTrack
 
 SkipBGMUpdate:
 	CMP	Port0, PrevMsg	; has SNES sent next message?
@@ -286,21 +293,25 @@ SkipBGMUpdate:
 
 	MOV	CurrentTrack, #0
 	MOV	DSPAddr, #0	; Go to channel #0 volume
-
+	JMP	+	; Loop optimisation.
+; -----------------------------------------------------------------------------
 UpdateTracks2:
-	MOV	X, CurrentTrack
+	CLR3	CurrentTrack	; revert to BGM
+	INC	CurrentTrack
+	AND	DSPAddr, #$70
+	
++	MOV	X, CurrentTrack
 	MOV	A, SndFlags+X
 	AND	A, #$20		; is the channel used by SFX?
 	BEQ	+		; branch if no
-	OR	CurrentTrack, #8	; process a SFX channel instead
+	SET3	CurrentTrack	; process a SFX channel instead
 +	CALL	UpdateTrack2	; update pitch bend
-	AND	CurrentTrack, #7	; revert to BGM
-	INC	CurrentTrack
-	ADC	DSPAddr, #$D	; Go to next channel volume
+	ADC	DSPAddr, #$10	; Go to next channel
 	BPL	UpdateTracks2
 
 FinishSFX:
 	DEC	Timer1Ticks
+	CLR4	CurPreprocTrack
 
 ; If we have finished all pending tasks above, try to asynchronously process
 ; sound data for each channel in a round-robin manner.
@@ -312,6 +323,8 @@ FinishSFX:
 ; processing the events and preparing to play a note, whenever we can.
 ; The result is much less lag and thus smoother rhythm.
 PreprocessTracks:
+	BBS4	CurPreprocTrack, Goto_GetMessage
+
 	CMP	Port0, PrevMsg	; has SNES sent next message?
 	BNE	Goto_GetMessage	; branch if yes
 
@@ -323,8 +336,7 @@ PreprocessTracks:
 	ADC	Timer1Ticks, Timer1_out	; has the main timer ticked?
 	BNE	Goto_GetMessage		; branch if yes
 
-+	AND	CurPreprocTrack, #15
-	MOV	X, CurPreprocTrack
++	MOV	X, CurPreprocTrack
 	INC	CurPreprocTrack
 
 	MOV	A, SndFlags+X	; Load track flags.
@@ -438,14 +450,38 @@ SoftKeyRelease3:
 	MOV	SndEnvLvl+X, A
 +	RET
 ; =============================================================================
+TempoToInterval2:
+	MOV	A, BGMTempo
+
+; Convert BGM tempo at register A to a timer period.
+; Period=25600/Tempo
+TempoToInterval:
+	CLR1	GlobalFlags	; Clear the "halve BGM tempo" flag.
+	MOV	2, Y	; Preserve Y.
+	MOV	X, A
+	MOV	A, #0
+	MOV	Y, #$64	; YA = 25600
+	DIV	YA, X
+	BVC	+	; branch if quotient < 256
+	SETC
+	ROR	A	; A = (A >> 1) | $80
+	SET1	GlobalFlags	; Clear the "halve BGM tempo" flag.
++	MOV	Timer0, A
+	MOV	Y, 2
+	RET
+; =============================================================================
 UpdateTracks:
 	; Initialise variables for channel #0.
 	MOV	CurVoiceBit, #1
 	MOV	CurVoiceAddr, #0
 	MOV	KeyOnShadow, #0
-
+	JMP	+	; Loop optimisation. Saves 6 cycles.
+; -----------------------------------------------------------------------------
 NextTrack:
-	MOV	X, CurrentTrack
+	ADC	CurVoiceAddr, #$10
+	INC	CurrentTrack
+
++	MOV	X, CurrentTrack
 
 	MOV	A, SndFlags+X	; Load track flags.
 	MOV	TempFlags, A
@@ -471,21 +507,19 @@ NextTrack:
 	CALL	SoftKeyRelease
 +
 FinishTrackUpdate:
-	MOV	X, CurrentTrack
 	MOV	A, TempFlags	; Save track flags.
 	MOV	SndFlags+X, A
-	INC	CurrentTrack	; Go to the next track.
-	ASL	CurVoiceBit
-	ADC	CurVoiceAddr, #$10
-	BPL	NextTrack
+
+	ASL	CurVoiceBit	; Go to the next track.
+	BCC	NextTrack	; ...if any.
 
 	; Now write the key-on mask to the DSP.
-	MOV	A, KeyOnShadow
+	MOV	Y, KeyOnShadow
 	BEQ	+	; Do not bother if nothing to key-on.
 	MOV	DSPAddr, #$5C
 	MOV	DSPData, #0
-	MOV	DSPAddr, #$4C
-	MOV	DSPData, A
+	MOV	A, #$4C
+	MOVW	DSPAddr, YA
 +	RET
 ; =============================================================================
 FetchNextEvent:
@@ -577,9 +611,9 @@ PrepareNote:
 	ADC	A, Transpose+X
 	ASL	A
 
-	; fine-tune given pitch with current fine-tune value
-	; with following formula:
-	; P=P*(1024+T)/1024, where T is fine-tune offset
+	; fine-tune given pitch P with current signed fine-tune value T by the
+	; following formula:
+	; P=P*(1024+T)/1024
 	MOV	Y, SndFineTune+X	; is fine-tune value zero?
 	BEQ	SkipTuning	; if yes, branch
 	MOV	X, A
@@ -604,7 +638,7 @@ PrepareNote:
 	LSR	3
 	ROR	A
 	MOV	2, A	; store LSB of the result as LSB of pitch offset
-	MOV	A, PitchTable+1+X ; read LSB of seed pitch value
+	MOV	A, PitchTable+1+X	; read LSB of seed pitch value
 	MOV	Y, A	
 	MOV	A, PitchTable+X	; read MSB of seed pitch value
 	BBS7	4, +	; branch on negative fine-tune
@@ -709,9 +743,6 @@ UpdateTrack2:	; $91C
 	MOV	X, CurrentTrack
 	MOV	A, SndFlags+X
 	BMI	+
-	CLR0	DSPAddr
-	SET1	DSPAddr
-	SETC
 	RET
 ; -----------------------------------------------------------------------------
 +	MOV	A, t_TremDelay+X
@@ -840,14 +871,13 @@ loc_AB4:
 	MOV	DSPData, #0
 	DEC	DSPAddr
 	MOV	DSPData, #0
-	SETC
 	RET
 ; =============================================================================
 EndOfTrack:
 	MOV	X, CurrentTrack
 	BBS5	TempFlags, +
-	CALL	SoftKeyRelease2
 	BBC7	TempFlags, +
+	CALL	SoftKeyRelease2
 	MOV	A, CurVoiceAddr
 	OR	A, #8
 	MOV	DSPAddr, A
@@ -1063,10 +1093,10 @@ Vibrato:	; $CB1
 SetADSR:	; $CDF
 	MOV	X, CurrentTrack
 	MOV	A, (0)+Y
-	MOV	SndADSR1+X, A ; ADSR 1
+	MOV	SndADSR1+X, A	; ADSR 1
 	INC	Y
 	MOV	A, (0)+Y
-	MOV	SndADSR2+X, A ; ADSR 2
+	MOV	SndADSR2+X, A	; ADSR 2
 	JMP	IncAndFinishEvent
 ; =============================================================================
 SetTuning:	; $D32
@@ -1104,13 +1134,7 @@ SetEchoParams:	; $D71
 	MOV	A, (0)+Y
 	MOV	DSPData, A
 	JMP	IncAndFinishEvent
-
-	;MOV	A, #0
-	;MOV	DSPFlagShadow, A
-	;MOV	DSPAddr, #DSP_Flags
-	;MOV	DSPData, A
-	;JMP	FinishEvent
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 EchoOn:		; $DA0
 	SET2	TempFlags
 	JMP	FinishEvent
@@ -1130,15 +1154,13 @@ SetFIR:		; $DD8
 	BPL	-
 
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 SetNoise:	; $DF8
 	MOV	A, (0)+Y
-	;MOV	NoiseShadow, A
-	;OR	A, DSPFlagShadow
 	MOV	DSPAddr, #DSP_Flags
 	MOV	DSPData, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 NoiseOn:	; $E12
 	SET3	TempFlags
 	JMP	FinishEvent
@@ -1149,18 +1171,18 @@ NoiseOff:	; $E2A
 ; =============================================================================
 PitchSlideDown2:	; $EA7
 	MOV	X, CurrentTrack
-	MOV	A, (0)+Y ; delay
+	MOV	A, (0)+Y	; delay
 	MOV	PitchSlideDelay+X, A
 	INC	Y
-	MOV	A, (0)+Y ; portamento interval
+	MOV	A, (0)+Y	; portamento interval
 	MOV	PitchSlideInterval+X, A
 	INC	Y
-	MOV	A, (0)+Y ; portamento steps
+	MOV	A, (0)+Y	; portamento steps
 	MOV	PitchSlideStepsDown+X, A
 	ASL	A
 	MOV	PitchSlideSteps+X, A
 	INC	Y
-	MOV	A, (0)+Y ; pitch delta
+	MOV	A, (0)+Y	; pitch delta
 	EOR	A, #-1
 	INC	A
 	MOV	PitchSlideDelta+X, A
@@ -1168,18 +1190,18 @@ PitchSlideDown2:	; $EA7
 ; =============================================================================
 PitchSlideUp2:	; $EDC
 	MOV	X, CurrentTrack
-	MOV	A, (0)+Y ; delay
+	MOV	A, (0)+Y	; delay
 	MOV	PitchSlideDelay+X, A
 	INC	Y
-	MOV	A, (0)+Y ; portamento interval
+	MOV	A, (0)+Y	; portamento interval
 	MOV	PitchSlideInterval+X, A
 	INC	Y
-	MOV	A, (0)+Y ; portamento steps
+	MOV	A, (0)+Y	; portamento steps
 	MOV	PitchSlideStepsDown+X, A
 	ASL	A
 	MOV	PitchSlideSteps+X, A
 	INC	Y
-	MOV	A, (0)+Y ; pitch delta
+	MOV	A, (0)+Y	; pitch delta
 	MOV	PitchSlideDelta+X, A
 	JMP	IncAndFinishEvent
 ; =============================================================================
@@ -1228,57 +1250,58 @@ TremoloOff:	; $FF8
 ; =============================================================================
 VoiceBitMask:	; $1004
 	db	1, 2, 4, 8, $10, $20, $40, $80
+; =============================================================================
 TrackEventTable:	; $1014
 	; See https://loveemu.hatenablog.com/entry/20130819/SNES_Rare_Music_Spec for details
-	dw	EndOfTrack	; $A6E	; individual effect
-	dw	SetVoice	; $ABA	; individual effect (no rest required)
-	dw	SetVolume	; $AE3	; individual effect (no rest required)
-	dw	JumpTrack	; $B14	; individual effect (no rest required)
-	dw	CallSub		; $B29	; individual effect (no rest required)
-	dw	RetSub		; $B5E	; individual effect (no rest required)
-	dw	DefaultDurOn	; $BA4	; individual effect (no rest required)
-	dw	DefaultDurOff	; $BC9	; individual effect (no rest required)
-	dw	PitchSlideUp	; $BD5	; individual effect
-	dw	PitchSlideDown	; $C09	; individual effect
-	dw	PitchSlideOff	; $C40	; individual effect
-	dw	SetTempo	; $C56	; global effect
-	dw	AddTempo	; $C6B	; global effect
-	dw	Vibrato2	; $C78	; individual effect
-	dw	VibratoOff	; $CA5	; individual effect
-	dw	Vibrato		; $CB1	; individual effect
-	dw	SetADSR		; $CDF	; individual effect (no rest required)
-	dw	SetMasterVolume	; $CF9	; individual effect (no rest required)
-	dw	SetTuning	; $D32	; individual effect (no rest required)
-	dw	SetTranspose	; $D45	; individual effect (no rest required)
-	dw	AddTranspose	; $D59	; individual effect (no rest required)
-	dw	SetEchoParams	; $D71	; global effect
-	dw	EchoOn		; $DA0	; individual effect (no rest required)
-	dw	EchoOff		; $DBB	; individual effect (no rest required)
-	dw	SetFIR		; $DD8	; global effect
-	dw	SetNoise	; $DF8	; global effect
-	dw	NoiseOn		; $E12	; individual effect (no rest required)
-	dw	NoiseOff	; $E2A	; individual effect (no rest required)
-	dw	0	; global effect
-	dw	0	; global effect
-	dw	0	; global effect
-	dw	0	; global effect
-	dw	0	; global effect
-	dw	0	; global effect
-	dw	0	; global effect
-	dw	0	; global effect
-	dw	0	; global effect
-	dw	0	; global effect
-	dw	PitchSlideDown2	; $EA7	; individual effect
-	dw	PitchSlideUp2	; $EDC	; individual effect
-	dw	VoiceAndVolume	; $F0E	; individual effect (no rest required)
-	dw	0	; global effect
-	dw	SetTimerFreq	; $F60	; individual effect (no rest required)
-	dw	LongNoteOn	; $F72	; individual effect (no rest required)
-	dw	LongNoteOff	; $F82	; individual effect (no rest required)
-	dw	0	; global effect
-	dw	SetJumpCond	; $FAC	; individual effect (no rest required)
-	dw	SetTremolo	; $FBE	; individual effect
-	dw	TremoloOff	; $FF8	; individual effect
+	DW	EndOfTrack	; $A6E	; individual effect
+	DW	SetVoice	; $ABA	; individual effect (no rest required)
+	DW	SetVolume	; $AE3	; individual effect (no rest required)
+	DW	JumpTrack	; $B14	; individual effect (no rest required)
+	DW	CallSub		; $B29	; individual effect (no rest required)
+	DW	RetSub		; $B5E	; individual effect (no rest required)
+	DW	DefaultDurOn	; $BA4	; individual effect (no rest required)
+	DW	DefaultDurOff	; $BC9	; individual effect (no rest required)
+	DW	PitchSlideUp	; $BD5	; individual effect
+	DW	PitchSlideDown	; $C09	; individual effect
+	DW	PitchSlideOff	; $C40	; individual effect
+	DW	SetTempo	; $C56	; global effect
+	DW	AddTempo	; $C6B	; global effect
+	DW	Vibrato2	; $C78	; individual effect
+	DW	VibratoOff	; $CA5	; individual effect
+	DW	Vibrato		; $CB1	; individual effect
+	DW	SetADSR		; $CDF	; individual effect (no rest required)
+	DW	SetMasterVolume	; $CF9	; individual effect (no rest required)
+	DW	SetTuning	; $D32	; individual effect (no rest required)
+	DW	SetTranspose	; $D45	; individual effect (no rest required)
+	DW	AddTranspose	; $D59	; individual effect (no rest required)
+	DW	SetEchoParams	; $D71	; global effect
+	DW	EchoOn		; $DA0	; individual effect (no rest required)
+	DW	EchoOff		; $DBB	; individual effect (no rest required)
+	DW	SetFIR		; $DD8	; global effect
+	DW	SetNoise	; $DF8	; global effect
+	DW	NoiseOn		; $E12	; individual effect (no rest required)
+	DW	NoiseOff	; $E2A	; individual effect (no rest required)
+	DW	0	; global effect
+	DW	0	; global effect
+	DW	0	; global effect
+	DW	0	; global effect
+	DW	0	; global effect
+	DW	0	; global effect
+	DW	0	; global effect
+	DW	0	; global effect
+	DW	0	; global effect
+	DW	0	; global effect
+	DW	PitchSlideDown2	; $EA7	; individual effect
+	DW	PitchSlideUp2	; $EDC	; individual effect
+	DW	VoiceAndVolume	; $F0E	; individual effect (no rest required)
+	DW	0	; global effect
+	DW	SetTimerFreq	; $F60	; individual effect (no rest required)
+	DW	LongNoteOn	; $F72	; individual effect (no rest required)
+	DW	LongNoteOff	; $F82	; individual effect (no rest required)
+	DW	0	; global effect
+	DW	SetJumpCond	; $FAC	; individual effect (no rest required)
+	DW	SetTremolo	; $FBE	; individual effect
+	DW	TremoloOff	; $FF8	; individual effect
 ; =============================================================================
 EventTypeTable:
 	db	1	; individual effect
@@ -1330,65 +1353,64 @@ EventTypeTable:
 	db	-1	; individual effect (no rest required)
 	db	1	; individual effect
 	db	1	; individual effect
-;-----------------------------------------------------------------------------
+; =============================================================================
 SetUpEngine:	; $1076
-	MOV	A, #0
+	MOV	Y, #0
 	BBC4	GlobalFlags, +	; skip some init on warm reset
 
-	MOV	DSPAddr, #$D	; echo feedback
-	MOV	DSPData, A	; = 0
-	MOV	DSPAddr, #$4D	; echo enable
-	MOV	DSPData, A	; = 0
+	MOV	A, #$D		; echo feedback
+	MOVW	DSPAddr, YA	; = 0
+	MOV	A, #$4D		; echo enable
+	MOVW	DSPAddr, YA	; = 0
 
-	MOV	DSPAddr, #$6D	; echo buffer location
-	MOV	DSPData, #$DF	; = $DF00..$FEFF
-	MOV	DSPAddr, #$7D	; echo delay
-	MOV	DSPData, #4	; set the echo delay to 4*16=64 ms
+	MOV	A, #$6D		; echo buffer location
+	MOV	Y, #$DF
+	MOVW	DSPAddr, YA
 
-	MOV	DSPAddr, #$C	; master left volume
-	MOV	DSPData, #64	; = 64
-	MOV	DSPAddr, #$1C	; master right volume
-	MOV	DSPData, #64	; = 64
-	MOV	DSPAddr, #$2D	; pitch modulation
-	MOV	DSPData, A	; = 0
-	MOV	DSPAddr, #$5D	; source directory (instrument table)
-	MOV	DSPData, #$32	; =$3200
+	MOV	A, #$7D		; echo delay
+	MOV	Y, #4
+	MOVW	DSPAddr, YA
 
-	MOV	Timer0, #1
-	MOV	Timer1, #20	; 2.5 ms | 400 Hz
-	MOV	ControlReg, #3
+	MOV	Y, #64
+	MOV	A, #$C		; master left volume
+	MOVW	DSPAddr, YA
+	MOV	A, #$1C
+	MOVW	DSPAddr, YA
 
-+	MOV	DSPAddr, #$2C	; echo left volume
-	MOV	DSPData, A	; ...is set to 0
-	MOV	DSPAddr, #$3C	; echo right volume
-	MOV	DSPData, A	; ...is set to 0
-	;MOV	DSPAddr, #$3D	; noise enable
-	;MOV	DSPData, A
-	MOV	DSPAddr, #DSP_Flags
-	MOV	DSPData, A
+	MOV	A, #$5D		; source directory (instrument table)
+	MOV	Y, #$32
+	MOVW	DSPAddr, YA
 
-	MOV	GlobalFlags, A
-	MOV	Timer0Ticks, A
-	MOV	Timer1Ticks, A
-	MOV	SFXDivCounter, #1
-	MOV	MiscDivCounter, #1
-	MOV	CurPreprocTrack, A
+	MOV	Y, #0
+	MOV	A, #$2D		; pitch modulation
+	MOVW	DSPAddr, YA	; = 0
 
-	MOV	0, #8
-	MOV	X, A
-	MOV	Y, A
-	MOV	1, Y
++	MOV	A, #$2C		; echo left volume
+	MOVW	DSPAddr, YA	; = 0
+	MOV	A, #$3C		; echo right volume
+	MOVW	DSPAddr, YA	; = 0
+	MOV	A, #$6C
+	MOVW	DSPAddr, YA
 
--	MOV	A, #1
-	MOV	NoteDur_L+X, A	; set delay duration to 1
+	MOV	A, Y	; A = 0
+	MOVW	GlobalFlags, YA		; Also clears CurPreprocTrack.
+
+	INC	A	; A = 1
+	MOV	Y, A	; Y = 1
+	MOVW	Timer0Ticks, YA		; Also sets Timer1Ticks.
+	MOVW	SFXDivCounter, YA	; Also sets MiscDivCounter
+
+	MOV	X, #7
+	MOV	Y, #15
+	JMP	+	; Loop optimisation. Saves 3 cycles.
+; -----------------------------------------------------------------------------
+-	DEC	X
+	DEC	Y
+
+	MOV	A, #1
++	MOV	NoteDur_L+X, A	; set delay duration to 1
 	MOV	SndFlags+X, A
-	MOV	A, MusicData+Y
-	MOV	TrkPtr_L+X, A
-	MOV	A, MusicData+1+Y
-	MOV	TrkPtr_H+X, A
-	MOV	A, 1
-	MOV	SndStackPtr+X, A
-	MOV	A, #0
+	DEC	A	; A = 0
 	MOV	NoteDur_H+X, A
 	MOV	DfltNoteDur_L+X, A
 	MOV	DfltNoteDur_H+X, A
@@ -1398,37 +1420,25 @@ SetUpEngine:	; $1076
 	MOV	PitchSlideDelta+X, A
 	MOV	VibDelta+X, A
 	MOV	TremDelta+X, A
-	; set ADSR to $8E-$C1
-	MOV	A, #$8E
+	MOV	A, MusicData-1+Y
+	MOV	TrkPtr_L+X, A
+	MOV	A, MusicData+Y
+	MOV	TrkPtr_H+X, A
+	MOV	A, X
+	ASL	A
+	ASL	A
+	ASL	A
+	MOV	SndStackPtr+X, A
+	; set ADSR to $FE-$C1
+	MOV	A, #$FE
 	MOV	SndADSR1+X, A
 	MOV	A, #$C1
 	MOV	SndADSR2+X, A
 
-	INC	X
-	INC	Y
-	INC	Y
-	CLRC
-	ADC	1, #8
-	DBNZ	0, -
+	DBNZ	Y, -
 
 	MOV	A, MusicData+16
 	MOV	BGMTempo, A
-
-; Convert BGM tempo at register A to a timer period.
-; Period=25600/Tempo
-TempoToInterval:
-	CLR1	GlobalFlags	; Clear the "halve BGM tempo" flag.
-	MOV	2, Y	; Preserve Y.
-	MOV	X, A
-	MOV	A, #0
-	MOV	Y, #$64	; YA = 25600
-	DIV	YA, X
-	BVC	+	; branch if quotient < 256
-	SETC
-	ROR	A	; A = (A >> 1) | $80
-	SET1	GlobalFlags	; Clear the "halve BGM tempo" flag.
-+	MOV	Timer0, A
-	MOV	Y, 2
 	RET
 ; =============================================================================
 PlaySFX:	; $1178
@@ -1471,8 +1481,8 @@ PlaySFX:	; $1178
 	MOV	SndVol_L+8+X, A
 	MOV	SndVol_R+8+X, A
 
-	; set ADSR to $8E-$C1
-	MOV	A, #$8E
+	; set ADSR to $FE-$C1
+	MOV	A, #$FE
 	MOV	SndADSR1+8+X, A
 	MOV	A, #$C1
 	MOV	SndADSR2+8+X, A
@@ -1488,17 +1498,16 @@ PlaySFX:	; $1178
 	RET
 ;-----------------------------------------------------------------------------
 PitchTable:	; $11E6
-	dw	484
-	dw	512,	543,	575,	609,	646,	684
-	dw	725,	768,	813,	862,	913,	967
-	dw	1024,	1085,	1150,	1218,	1291,	1367
-	dw	1449,	1535,	1626,	1723,	1825,	1934
-	dw	2048,	2170,	2299,	2436,	2581,	2734
-	dw	2897,	3069,	3251,	3445,	3650,	3867
-	dw	4096,	4340,	4598,	4871,	5161,	5468
-	dw	5793,	6138,	6502,	6889,	7299,	7733
-	dw	8192,	8680,	9196,	9742,	10322,	10936
-	dw	11586,	12275,	13004,	13778,	14597,	15465
-	dw	16383,	8680,	9196,	9742,	10322,	10936
-	dw	11586,	12275,	13004,	13778,	14597,	15465
-
+	DW	483
+	DW	512,	542,	574,	608,	645,	683
+	DW	724,	767,	812,	861,	912,	966
+	DW	1024,	1084,	1149,	1217,	1290,	1366
+	DW	1448,	1534,	1625,	1722,	1824,	1933
+	DW	2048,	2169,	2298,	2435,	2580,	2733
+	DW	2896,	3068,	3250,	3444,	3649,	3866
+	DW	4096,	4339,	4597,	4870,	5160,	5467
+	DW	5792,	6137,	6501,	6888,	7298,	7732
+	DW	8192,	8679,	9195,	9741,	10321,	10935
+	DW	11585,	12274,	13003,	13777,	14596,	15464
+	DW	16383,	8679,	9195,	9741,	10321,	10935
+	DW	11585,	12274,	13003,	13777,	14596,	15464
