@@ -409,6 +409,9 @@ PreprocessTracks:
 	ADC	Timer1Ticks, Timer1_out	; has the main timer ticked?
 	BNE	UpdateSFX		; branch if yes
 
+	CALL	PreprocessTracks2
+	JMP	GetMessage
+; =============================================================================
 PreprocessTracks2:
 	CLR4	CurPreprocTrack
 	MOV	X, CurPreprocTrack
@@ -416,7 +419,7 @@ PreprocessTracks2:
 
 	MOV	A, SndFlags+X	; Load track flags.
 	MOV	TempFlags, A
-	BBC0	TempFlags, FinishPreproc	; branch if not active
+	BBC0	TempFlags, SkipPreproc	; branch if not active
 
 	; Prepare the DSP address and voice bitmask variables.
 	; Also, access the ENVX register.
@@ -477,8 +480,8 @@ Preproc_RestOrNote:
 FinishPreproc:
 	MOV	A, TempFlags	; Save track flags.
 	MOV	SndFlags+X, A
-Goto_GetMessage:
-	JMP	GetMessage
+SkipPreproc:
+	RET
 ; -----------------------------------------------------------------------------
 Preproc_Rest:
 	INC	Y	; proceed to the next track byte
@@ -568,22 +571,52 @@ AdjustSFXVol:
 StartEngine:
 	SET0	GlobalFlags
 	CALL	TempoToInterval2
-	MOV	ControlReg, #3
+-	CALL	PreprocessTracks2
+	BBC3	CurPreprocTrack, -
+	MOV	ControlReg, #3	; Start timers 0 and 1.
 	JMP	GetMessage
 ; =============================================================================
 ; Stop the engine and enter transfer mode.
 GotoTransferMode:
-	MOV	A, #$5C
-	MOV	Y, #-1
-	MOVW	DSPAddr, YA	; Key-off all channels.
+	; Set all channels to fade out.
+	MOV	A, #7
+	MOV	Y, #$BF		; Exponential fade-out, rate 15
+	CLRC
+-	MOVW	DSPAddr, YA
+	CLR1	DSPAddr
+	CLR7	DSPData
+	ADC	A, #$10
+	BPL	-
+
+	; Fade out FIR filter taps.
+	MOV	DSPAddr, #$F
+--	MOV	A, DSPData
+	BPL	+
+-	INC	DSPData
+	BNE	-
+	JMP	++
+; -----------------------------------------------------------------------------
++	BEQ	++
+-	DBNZ	DSPData, -
+++	ADC	DSPAddr, #$10
+	BPL	--
+
 	CALL	ResetEcho	; Set the echo delay to 0.
 
-	MOV	A, #0
+	;MOV	A, #0
 	MOV	Y, #8
 -	MOV	SndFIRShadow-1+Y, A
 	DBNZ	Y, -
 
 	MOV	X, NextMsg
+
+	; Wait until all channels fade out.
+	MOV	DSPAddr, #8
+-	MOV	A, DSPData
+	BNE	-
+	ADC	DSPAddr, #$10
+	BPL	-
+
 	JMP	TransferMode	; Enter transfer mode.
 ; =============================================================================
 Command_Index:
@@ -599,9 +632,8 @@ SoftKeyRelease2:
 SoftKeyRelease3:
 	OR	A, #7
 	MOV	DSPAddr, A
-	MOV	DSPData, #$BF
-	SETC
-	SBC	DSPAddr, #2
+	MOV	DSPData, #$BF	; Exponential fade-out, rate 15
+	CLR1	DSPAddr
 	CLR7	DSPData
 	MOV	A, #127
 	MOV	SndEnvLvl+X, A
@@ -705,7 +737,7 @@ FinishEvent:
 	DEC	CurPreprocTrack		; Process the track again.
 	MOV	A, TempFlags		; Store the flags.
 	MOV	SndFlags+X, A
-	JMP	GetMessage
+	RET
 ; =============================================================================
 ; Key-off and set rest duration.
 ProcessRest:
@@ -1039,7 +1071,7 @@ StopTrack:	; $B18
 	BBS3	GlobalFlags, +
 	JMP	FinishTrackUpdate
 ; -----------------------------------------------------------------------------
-+	JMP	GetMessage
++	RET
 ; =============================================================================
 SetInstrument:	; $B72
 	MOV	X, CurrentTrack
@@ -1171,17 +1203,11 @@ SetVolumePreset:	; $C83
 ; =============================================================================
 ResetEcho:
 	MOV	A, #0
+ResetEcho2:
 	MOV	DSPAddr, #$7D
 	MOV	DSPData, A	; set echo delay to 0
 	MOV	DSPAddr, #$4D
 	MOV	DSPData, A	; disable echo input
-
-	; Clear FIR echo filter taps
-	MOV	DSPAddr, #$F
-	CLRC
--	MOV	DSPData, A
-	ADC	DSPAddr, #$10
-	BPL	-
 
 	CALL	WaitForEcho	; wait for echo hardware to latch the new delay value
 	JMP	WaitForEcho_retry
@@ -1211,15 +1237,25 @@ RestoreEcho:
 	MOV	DSPAddr, #$8F	; FIR 8th tap + $10.
 	SETC
 -	SBC	DSPAddr, #$10
+	XCN	A		; Delay.
+	XCN	A		; Delay.
 	MOV	A, SndFIRShadow+X
-	NOP			; Delay.
 	MOV	DSPData, A
 	DEC	X
 	BPL	-
 	RET
 ; =============================================================================
 SetEchoDelay:	; $CA0
-	CALL	ResetEcho
+	MOV	A, #0
+
+	; Clear FIR echo filter taps
+	MOV	DSPAddr, #$F
+	CLRC
+-	MOV	DSPData, A
+	ADC	DSPAddr, #$10
+	BPL	-
+
+	CALL	ResetEcho2
 
 	MOV	A, (0)+Y
 	AND	A, #$1E
@@ -1233,7 +1269,7 @@ SetEchoDelay:	; $CA0
 	MOV	DSPData, A
 	MOV	EchoBufferLoc, A
 
-	MOV	DSPAddr, #$7D	; echo delay
+	SET4	DSPAddr		; echo delay
 	MOV	A, 2
 	LSR	A
 	MOV	DSPData, A
@@ -1483,7 +1519,7 @@ SetEcho:	; $E97
 	MOV	DSPData, A
 	INC	Y
 
-	MOV	DSPAddr, #$3C	; echo right channel
+	SET4	DSPAddr		; echo right channel
 	MOV	A, (0)+Y
 	MOV	DSPData, A
 
@@ -1612,11 +1648,12 @@ SetUpEngine:	; $100B
 	MOV	ControlReg, A
 	MOV	Y, A
 	MOVW	GlobalFlags, YA		; Also clears CurPreprocTrack.
-	MOVW	Timer0Ticks, YA		; Also clears Timer1Ticks.
 	MOVW	SndNewPitchOffset, YA	; clear pitch offset for SFX channel #5
 	MOVW	SndPitchOffset, YA
 	MOV	SFXCount, #1
 	MOV	EchoOnShadow, A
+	MOV	Timer0Ticks, #1
+	MOV	Timer1Ticks, #1
 
 	MOV	BGMVol, #100
 
@@ -1688,9 +1725,8 @@ loc_1111:
 	XCN	A
 	OR	A, #7
 	MOV	DSPAddr, A
-	MOV	DSPData, #$9F
-	SETC
-	SBC	DSPAddr, #2
+	MOV	DSPData, #$9F	; Linear fade-out, rate 15
+	CLR1	DSPAddr
 	CLR7	DSPData
 	MOV	A, #127
 	MOV	SndEnvLvl+8+X, A

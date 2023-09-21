@@ -168,6 +168,7 @@ SoundEntryPnt =		$5E8
 MusicData =		$12A0
 SFXData	=		$2380
 SourceDir =		$3200
+EchoBuffer =		$DF00
 
 	arch spc700
 	optimize dp always
@@ -241,16 +242,42 @@ GetMessage2:
 GotoTransferMode:	; $71F
 	MOV	X, #0
 	MOV	Port1, X	; Tell SNES we are in transfer mode.
-	MOV	A, #$5C
-	MOV	Y, #-1
-	MOVW	DSPAddr, YA	; Key-off all channels.
+
+	; Set all channels to fade out.
+	MOV	DSPAddr, #7
+	CLRC
+-	MOV	DSPData, #$BF	; Exponential fade-out, rate 15
+	CLR1	DSPAddr
+	CLR7	DSPData
+	ADC	DSPAddr, #$12
+	BPL	-
+
+	; Fade out echo feedback.
 	MOV	DSPAddr, #$D
-	MOV	DSPData, X	; Set echo feedback to 0.
+	MOV	A, DSPData
+	BPL	+
+-	INC	DSPData
+	BNE	-
+	JMP	++
+; -----------------------------------------------------------------------------
++	BEQ	++
+-	DBNZ	DSPData, -
+++
+
+	; Wait until all channels fade out.
+	MOV	DSPAddr, #8
+-	MOV	A, DSPData
+	BNE	-
+	ADC	DSPAddr, #$10
+	BPL	-
+
 	JMP	TransferMode
 ; -----------------------------------------------------------------------------
 StartSound:	; $643
 	SET0	GlobalFlags
 	CALL	TempoToInterval2
+-	CALL	PreprocessTracks2
+	BBC3	CurPreprocTrack, -
 	MOV	ControlReg, #3	; Start timers 0 and 1.
 	JMP	GetMessage
 ; =============================================================================
@@ -316,7 +343,7 @@ FinishSFX:
 ; The result is much less lag and thus smoother rhythm.
 PreprocessTracks:
 	CMP	Port0, PrevMsg	; has SNES sent next message?
-	BNE	Goto_GetMessage	; branch if yes
+	BNE	++		; branch if yes
 
 	BBC0	GlobalFlags, +
 
@@ -326,13 +353,17 @@ PreprocessTracks:
 	ADC	Timer1Ticks, Timer1_out	; has the main timer ticked?
 	BNE	UpdateSFX		; branch if yes
 
-+	CLR4	CurPreprocTrack
++	CALL	PreprocessTracks2
+++	JMP	GetMessage
+; =============================================================================
+PreprocessTracks2:
+	CLR4	CurPreprocTrack
 	MOV	X, CurPreprocTrack
 	INC	CurPreprocTrack
 
 	MOV	A, SndFlags+X	; Load track flags.
 	MOV	TempFlags, A
-	BBC0	TempFlags, FinishPreproc	; branch if not active
+	BBC0	TempFlags, SkipPreproc	; branch if not active
 
 	; Prepare the DSP address and voice bitmask variables.
 	; Also, access the ENVX register.
@@ -392,8 +423,8 @@ Preproc_RestOrNote:
 FinishPreproc:
 	MOV	A, TempFlags	; Save track flags.
 	MOV	SndFlags+X, A
-Goto_GetMessage:
-	JMP	GetMessage
+SkipPreproc:
+	RET
 ; -----------------------------------------------------------------------------
 Preproc_Rest:
 	INC	Y	; proceed to the next track byte
@@ -434,8 +465,7 @@ SoftKeyRelease3:
 	OR	A, #7
 	MOV	DSPAddr, A
 	MOV	DSPData, #$BF
-	SETC
-	SBC	DSPAddr, #2
+	CLR1	DSPAddr
 	CLR7	DSPData
 	MOV	A, #127
 	MOV	SndEnvLvl+X, A
@@ -543,7 +573,7 @@ FinishEvent:
 	DEC	CurPreprocTrack		; Process the track again.
 	MOV	A, TempFlags		; Store the flags.
 	MOV	SndFlags+X, A
-	JMP	GetMessage
+	RET
 ; =============================================================================
 ; Key-off and set rest duration.
 ProcessRest:
@@ -891,7 +921,7 @@ EndOfTrack:
 	BBS3	GlobalFlags, +
 	JMP	FinishTrackUpdate
 ; -----------------------------------------------------------------------------
-+	JMP	GetMessage
++	RET
 ; =============================================================================
 SetVoice:	; $ABA
 	MOV	X, CurrentTrack
@@ -1125,7 +1155,7 @@ SetEchoParams:	; $D71
 	MOV	DSPData, A
 	INC	Y
 
-	MOV	DSPAddr, #DSP_EchoR
+	SET4	DSPAddr
 	MOV	A, (0)+Y
 	MOV	DSPData, A
 	JMP	IncAndFinishEvent
@@ -1360,13 +1390,11 @@ SetUpEngine:	; $1076
 	MOV	A, #$4D		; echo enable
 	MOVW	DSPAddr, YA	; = 0
 
-	MOV	A, #$6D		; echo buffer location
-	MOV	Y, #$DF
-	MOVW	DSPAddr, YA
+	SET5	DSPAddr		; echo buffer location
+	MOV	DSPData, #EchoBuffer>>8
 
-	MOV	A, #$7D		; echo delay
-	MOV	Y, #4
-	MOVW	DSPAddr, YA
+	SET4	DSPAddr		; echo delay
+	MOV	DSPData, #4	; = 64 ms
 
 	MOV	Y, #64
 	MOV	A, #$C		; master left volume
@@ -1375,7 +1403,7 @@ SetUpEngine:	; $1076
 	MOVW	DSPAddr, YA
 
 	MOV	A, #$5D		; source directory (instrument table)
-	MOV	Y, #$32
+	MOV	Y, #SourceDir>>8
 	MOVW	DSPAddr, YA
 
 	MOV	Y, #0
@@ -1392,11 +1420,11 @@ SetUpEngine:	; $1076
 	MOV	A, Y	; A = 0
 	MOV	ControlReg, A
 	MOVW	GlobalFlags, YA		; Also clears CurPreprocTrack.
-	MOVW	Timer0Ticks, YA		; Also clears Timer1Ticks.
 
 	INC	A	; A = 1
 	MOV	Y, A	; Y = 1
 	MOVW	SFXDivCounter, YA	; Also sets MiscDivCounter
+	MOVW	Timer0Ticks, YA		; Also sets Timer1Ticks.
 
 	MOV	X, #7
 	MOV	Y, #15
