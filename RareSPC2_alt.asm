@@ -34,20 +34,23 @@ EchoBufferLoc:	skip 1	; location of the echo buffer
 ; 2: if bit 1 is set, skip BGM updates
 ; 3: events are being preprocessed
 ; 4: monaural mode
+; 5: cold reset
+; 6: echo buffer is being cleared
 GlobalFlags:	skip 1
 
+CurPreprocTrack:	skip 1	; number of channel to be preprocessed
 BGMTempo:	skip 1
 Timer0Ticks:	skip 1
 Timer1Ticks:	skip 1
 SndNewPitchOffset:	skip 2	; New pitch offset for SFX channel #5
 SndPitchOffset:	skip 2	; Current pitch offset for SFX channel #5
 SFXCount:	skip 1
-CurPreprocTrack:	skip 1	; number of channel to be preprocessed
 BGMVol:		skip 1	; current BGM volume
 VolPreset1_L:	skip 1
 VolPreset1_R:	skip 1
 VolPreset2_L:	skip 1
 VolPreset2_R:	skip 1
+EchoOnShadow:	skip 1
 
 	ORG	$20
 
@@ -172,12 +175,17 @@ DSP_FIR =	$0F
 ; locations of external data
 MusicData =	$1300
 MusicIndex =	$1312
+
+; Sound data for SFXs $00..$5F
 SFX_IndexBound0 =	$2410
 SFX_PtrTable0 =		$2412
+
+; Sound data for SFXs $60..$7F
 SFX_IndexBound1 =	$2E94
 SFX_PtrTable1 =		$2E96
-SourceDir =	$3100
 
+SourceDir =	$3100
+EchoBufEnd =	$FEFE
 
 	arch spc700
 	optimize dp always
@@ -185,24 +193,24 @@ SourceDir =	$3100
 	ORG	$EE0000	; set to $ED0000 for Donkey Kong Country 3
 	base	$4D8
 EntryPoint:
+	MOV	X, #PrgStackBase&$FF
+	MOV	SP, X
 	MOV	X, #0
 	MOV	Port0, X	; Tell SNES we are in this transfer routine
 	MOV	DSPAddr, #$7D
 	MOV	DSPData, X	; Set echo delay to 0
-	INC	X		; X := 1
-	MOV	NextMsg, X	; Store message ID
-	MOV	X, #PrgStackBase&$FF
-	MOV	SP, X
+	INC	X		; X = 1
+	SET5	GlobalFlags
 
 TransferMode:
 	; Reset echo buffer settings.
-	MOV	DSPAddr, #$6D	; Echo buffer location
-	MOV	DSPData, #EchoSample>>8
-	MOV	EchoBufferLoc, #EchoSample>>8
-	MOV	X, NextMsg
-GetNextBlock:
-	CMP	X, Port0	; has SNES sent the next data word?
-	BNE	GetNextBlock	; branch if no
+	MOV	A, #$6D
+	MOV	Y, #EchoSample>>8
+	MOVW	DSPAddr, YA
+	MOV	EchoBufferLoc, Y
+
+--	CMP	X, Port0	; has SNES sent the next data word?
+	BNE	--	; branch if no
 	MOVW	YA, Port1	; get write address
 	MOV	Port0, X	; reply to SNES
 	INC	X		; increment message ID
@@ -215,7 +223,7 @@ GetNextBlock:
 	INC	X		; increment message ID
 	MOVW	0, YA		; store block size
 	DECW	0		; is it $8001..$FFFF or zero?
-	BMI	loc_556		; branch if yes
+	BMI	+		; branch if yes
 
 	; Convert the block size into the initial Y index and
 	; the number of 256 byte-sized chunks plus 1.
@@ -227,33 +235,31 @@ GetNextBlock:
 	MOV	A, 2	; get destination LSB
 	SETC
 	SBC	A, 0	; subtract the initial index
-	MOV	WriteLSB+1, A	; store the result
-	MOV	WriteMSB+1, A
+	MOV	.lsb+1, A	; store the result
+	MOV	.msb+1, A
 	MOV	A, 3	; get destination MSB
 	SBC	A, #0	; decrement on subtraction burrow
-	MOV	WriteLSB+2, A	; store the result
-	MOV	WriteMSB+2, A
-WaitDataWord:
-	CMP	X, Port0	; has SNES sent the next data word?
-	BNE	WaitDataWord	; branch if no
+	MOV	.lsb+2, A	; store the result
+	MOV	.msb+2, A
+
+-	CMP	X, Port0	; has SNES sent the next data word?
+	BNE	-		; branch if no
 	MOV	A, Port1	; get first data byte
-WriteLSB:
-	MOV.W	0+Y, A		; store it at the destination
+
+.lsb:	MOV.W	0+Y, A		; store it at the destination
 	MOV	A, Port2	; get second data byte
 	MOV	Port0, X	; reply to SNES
 	INC	X		; increment message ID
 	INC	Y		; increment index
-WriteMSB:
-	MOV.W	0+Y, A		; store it at the destination
+.msb:	MOV.W	0+Y, A		; store it at the destination
 	INC	Y		; have we finished the chunk?
-	BNE	WaitDataWord	; branch if not
-	INC	WriteLSB+2	; add $100 to write address
-	INC	WriteMSB+2
-	DBNZ	1, WaitDataWord	; proceed with the next chunk if any
-	JMP	GetNextBlock
+	BNE	-		; branch if not
+	INC	.lsb+2		; add $100 to write address
+	INC	.msb+2
+	DBNZ	1, -		; proceed with the next chunk if any
+	JMP	--
 ; -----------------------------------------------------------------------------
-loc_556:
-	MOV	NextMsg, X	; store next message index
++	MOV	NextMsg, X	; store next message index
 	MOV	X, #0		; clear index
 	JMP	(2+X)		; jump to the given address
 ; =============================================================================
@@ -299,8 +305,8 @@ SetIndexedBGM:
 ; This is the entry point of the engine.
 ; Set the pointer to a song to $1300 and initialise the engine.
 SetFixedBGM:
-	MOV	A, #0
-	MOV	Y, #$13
+	MOV	A, #MusicData&$FF
+	MOV	Y, #MusicData>>8
 EngineStart:
 	MOVW	2, YA
 	CALL	SetUpEngine	; set up S-DSP and music
@@ -332,10 +338,14 @@ GetMessage2:
 ; =============================================================================
 MainLoop:
 	BBC0	GlobalFlags, GetMessage	; branch if the sound has not started yet
+	BBC6	GlobalFlags, +
 
-	CLR3	GlobalFlags	; clear the preprocess flag
+	MOV	A, EchoBufEnd
+	BNE	+
 
-	CLRC
+	CALL	RestoreEcho
+
++	CLRC
 	ADC	Timer0Ticks, Timer0_out	; has the BGM timer ticked?
 	BEQ	SkipBGMUpdate		; branch if no
 
@@ -371,7 +381,7 @@ UpdateTracks2:
 	BEQ	+		; branch if no
 	OR	CurrentTrack, #8	; process a SFX channel instead
 +	CALL	UpdateTrack_2	; update pitch bend
-	AND	CurrentTrack, #7	; revert to BGM
+	CLR3	CurrentTrack		; revert to BGM
 	INC	CurrentTrack
 	ADC	DSPAddr, #$F	; Go to next channel pitch
 	BPL	UpdateTracks2
@@ -391,7 +401,7 @@ UpdateTracks2:
 ; processing the events and preparing to play a note, whenever we can.
 ; The result is much less lag and thus smoother rhythm.
 PreprocessTracks:
-	CMP	Port0, NextMsg	; has SNES sent next message?
+	CMP	Port0, NextMsg		; has SNES sent next message?
 	BEQ	GetMessage2		; branch if yes
 	CLRC
 	ADC	Timer0Ticks, Timer0_out	; has the BGM timer ticked?
@@ -399,7 +409,8 @@ PreprocessTracks:
 	ADC	Timer1Ticks, Timer1_out	; has the main timer ticked?
 	BNE	UpdateSFX		; branch if yes
 
-	AND	CurPreprocTrack, #15
+PreprocessTracks2:
+	CLR4	CurPreprocTrack
 	MOV	X, CurPreprocTrack
 	INC	CurPreprocTrack
 
@@ -408,7 +419,7 @@ PreprocessTracks:
 	BBC0	TempFlags, FinishPreproc	; branch if not active
 
 	; Prepare the DSP address and voice bitmask variables.
-	; Also access the ENVX register.
+	; Also, access the ENVX register.
 	MOV	A, X
 	AND	A, #7	; Limit to 0..7.
 	MOV	Y, A
@@ -419,6 +430,7 @@ PreprocessTracks:
 	MOV	A, VoiceBitMask+Y	; Get the bitmask for the channel.
 	MOV	CurVoiceBit, A
 
+	; Mark the channel as silent if the ADSR envelope falls to zero.
 	MOV	A, DSPData	; Read the current ADSR envelope level.
 	CMP	A, SndEnvLvl+X	; Compare with the level measured earlier.
 	MOV	SndEnvLvl+X, A	; Store it.
@@ -465,6 +477,7 @@ Preproc_RestOrNote:
 FinishPreproc:
 	MOV	A, TempFlags	; Save track flags.
 	MOV	SndFlags+X, A
+Goto_GetMessage:
 	JMP	GetMessage
 ; -----------------------------------------------------------------------------
 Preproc_Rest:
@@ -518,29 +531,27 @@ CommandF9:	; formerly used to set a BGM mailslot or something?
 ; Change pitch modifier for SFX at channel #5.
 ; Used to adjust pitch of the sound of riding a cart.
 ; Offset=Argument*8
-CommandFC:
-	MOV	A, Y
-	BMI	+	; Sign-extend the argument.
-	MOV	SndNewPitchOffset+1, #0
-	JMP	++
-; -----------------------------------------------------------------------------
-+	MOV	SndNewPitchOffset+1, #-1
-++	ASL	A			; Multiply the argument by 8.
-	ROL	SndNewPitchOffset+1
-	ASL	A
-	ROL	SndNewPitchOffset+1
-	ASL	A
-	ROL	SndNewPitchOffset+1
-	MOV	SndNewPitchOffset, A
+AdjustSFXPitch:
+	MOV	SndNewPitchOffset, Y
+	MOV	A, #0
+	ASL	SndNewPitchOffset	; Multiply by 8.
+	BCC	+		; Sign-extend.
+	DEC	A		; A = -1
++	ASL	SndNewPitchOffset
+	ROL	A
+	ASL	SndNewPitchOffset
+	ROL	A
+	MOV	SndNewPitchOffset+1, A
 
 	MOV	DSPAddr, #$4D
 	CLR5	DSPData		; Disable echo for DSP channel #5.
+	CLR5	EchoOnShadow
 	CLR2	SndFlags+8+5	; Clear the "echo on" flag at SFX track #5.
 	JMP	GetMessage
 ; =============================================================================
 ; Change the volume of SFX at channel #5.
 ; Volume = Volume * Modifier / 100
-CommandFD:
+AdjustSFXVol:
 	MOV	0, Y
 	MOV	DSPAddr, #$50
 	MOV	A, DSPData
@@ -556,22 +567,29 @@ CommandFD:
 ; Start processing music and sound effects.
 StartEngine:
 	SET0	GlobalFlags
-	MOV	ControlReg, #3	; Enable timers 0 and 1
 	CALL	TempoToInterval2
-	MOV	Timer1, #100	; Set timer 1 to 12.5 ms
+	MOV	ControlReg, #3
 	JMP	GetMessage
 ; =============================================================================
 ; Stop the engine and enter transfer mode.
 GotoTransferMode:
-	MOV	DSPAddr, #$5C
-	MOV	DSPData, #-1	; Key-off all channels.
+	MOV	A, #$5C
+	MOV	Y, #-1
+	MOVW	DSPAddr, YA	; Key-off all channels.
 	CALL	ResetEcho	; Set the echo delay to 0.
+
+	MOV	A, #0
+	MOV	Y, #8
+-	MOV	SndFIRShadow-1+Y, A
+	DBNZ	Y, -
+
+	MOV	X, NextMsg
 	JMP	TransferMode	; Enter transfer mode.
 ; =============================================================================
 Command_Index:
 	DW	CommandF8, CommandF9		; $F8, $F9
 	DW	SetMonoFlag, SetIndexedBGM	; $FA, $FB
-	DW	CommandFC, CommandFD		; $FC, $FD
+	DW	AdjustSFXPitch, AdjustSFXVol	; $FC, $FD
 	DW	StartEngine, GotoTransferMode	; $FE, $FF
 ; =============================================================================
 SoftKeyRelease:
@@ -614,9 +632,14 @@ UpdateTracks:
 	MOV	CurVoiceBit, #1
 	MOV	CurVoiceAddr, #0
 	MOV	KeyOnShadow, #0
-
+	CLR3	GlobalFlags
+	JMP	+	; Loop optimisation. Saves 6 cycles.
+; -----------------------------------------------------------------------------
 NextTrack:
-	MOV	X, CurrentTrack
+	ADC	CurVoiceAddr, #$10
+	INC	CurrentTrack
+
++	MOV	X, CurrentTrack
 
 	MOV	A, SndFlags+X	; Load track flags.
 	MOV	TempFlags, A
@@ -640,25 +663,20 @@ NextTrack:
 	BNE	+
 	BBS6	TempFlags, +	; Branch if a note is ready for key-on.
 	CALL	SoftKeyRelease
-+
+
 FinishTrackUpdate:
-	MOV	X, CurrentTrack
-	MOV	A, TempFlags	; Save track flags.
-	MOV	SndFlags+X, A
-	INC	CurrentTrack	; Go to the next track.
-	ASL	CurVoiceBit
-	ADC	CurVoiceAddr, #$10
-	BPL	NextTrack
++	ASL	CurVoiceBit	; Go to the next track.
+	BCC	NextTrack	; ...if any.
 
 	; Now write the key-on mask to the DSP.
-	MOV	A, KeyOnShadow
+	MOV	Y, KeyOnShadow
 	BEQ	+	; Do not bother if nothing to key-on.
 	MOV	DSPAddr, #$5C
 	MOV	DSPData, #0
-	MOV	DSPAddr, #$4C
-	MOV	DSPData, A
+	MOV	A, #$4C
+	MOVW	DSPAddr, YA
 +	RET
-; =============================================================================
+; -----------------------------------------------------------------------------
 FetchNextEvent:
 	MOV	A, TrkPtr_L+X	; Load track data pointer.
 	MOV	Y, TrkPtr_H+X
@@ -732,6 +750,8 @@ SetDuration:
 	ADDW	YA, 0
 	MOV	TrkPtr_L+X, A	; store pointer LSB
 	MOV	TrkPtr_H+X, Y	; store pointer MSB
+	MOV	A, TempFlags
+	MOV	SndFlags+X, A
 	JMP	FinishTrackUpdate
 ; =============================================================================
 PrepareNote:
@@ -871,14 +891,14 @@ TuningDone:
 	INC	DSPAddr
 	MOV	DSPData, #127	; GAIN value if ADSR is disabled
 
-	MOV	DSPAddr, #$4D
-	MOV	A, DSPData
-	OR	A, CurVoiceBit
+	OR	EchoOnShadow, CurVoiceBit
 	BBS2	TempFlags, +
-	EOR	A, CurVoiceBit	; disable echo
-+	MOV	DSPData, A
+	EOR	EchoOnShadow, CurVoiceBit
++	BBS6	GlobalFlags, +
+	MOV	DSPAddr, #$4D
+	MOV	DSPData, EchoOnShadow
 
-	MOV	DSPAddr, #$3D
++	MOV	DSPAddr, #$3D
 	MOV	A, DSPData
 	OR	A, CurVoiceBit
 	BBS3	TempFlags, +
@@ -1000,8 +1020,8 @@ loc_AB4:
 StopTrack:	; $B18
 	MOV	X, CurrentTrack
 	BBS5	TempFlags, +
-	CALL	SoftKeyRelease2
 	BBC7	TempFlags, +
+	CALL	SoftKeyRelease2
 	MOV	A, CurVoiceAddr
 	OR	A, #8
 	MOV	DSPAddr, A
@@ -1014,12 +1034,12 @@ StopTrack:	; $B18
 	AND	A, #$DF
 	MOV	SndFlags-8+X, A
 
-.ret:	BBS3	GlobalFlags, +
+.ret:	MOV	A, TempFlags
+	MOV	SndFlags+X, A
+	BBS3	GlobalFlags, +
 	JMP	FinishTrackUpdate
 ; -----------------------------------------------------------------------------
-+	MOV	A, TempFlags
-	MOV	SndFlags+X, A
-	JMP	GetMessage
++	JMP	GetMessage
 ; =============================================================================
 SetInstrument:	; $B72
 	MOV	X, CurrentTrack
@@ -1100,36 +1120,38 @@ SetBGMVol:	; $C4E
 ApplyVolMod:	; $C59
 	; calculate sound volume with following formula:
 	; Volume*Modifier/100
+	; Then, clip the result to [-128;127].
 	CMP	X, #8
 	BCS	ApplyVolMod2_ret	; don't change volume for SFXs
 	MOV	Y, BGMVol
 ApplyVolMod2:
 	MOV	X, #100
 	OR	A, #0
-	BMI	loc_C71
+	BMI	.minus
 	MUL	YA
 	DIV	YA, X
-	BVS	+
-	MOV	X, A
-	BPL	++	; branch if A < 128
-+	MOV	A, #127
-++	MOV	X, CurrentTrack
+	BMI	+	; branch if A >= 128
+	BVS	+	; Unlikely, but branch on overflow.
+	MOV	X, CurrentTrack
 .ret:	RET
 ; -----------------------------------------------------------------------------
-loc_C71:
++	MOV	A, #127
+	MOV	X, CurrentTrack
+	RET
+; -----------------------------------------------------------------------------
+.minus:
 	EOR	A, #-1
 	INC	A
 	MUL	YA
 	DIV	YA, X
-	BVS	+
-	MOV	X, A
-	BPL	++	; branch if A < 128
-+	MOV	A, #-128
+	BMI	+	; branch if A >= 128
+	BVS	+	; Unlikely, but branch on overflow.
+	EOR	A, #-1
+	INC	A
 	MOV	X, CurrentTrack
 	RET
 ; -----------------------------------------------------------------------------
-++	EOR	A, #-1
-	INC	A
++	MOV	A, #-128
 	MOV	X, CurrentTrack
 	RET
 ; =============================================================================
@@ -1152,7 +1174,6 @@ ResetEcho:
 	MOV	DSPAddr, #$7D
 	MOV	DSPData, A	; set echo delay to 0
 	MOV	DSPAddr, #$4D
-	MOV	3, DSPData
 	MOV	DSPData, A	; disable echo input
 
 	; Clear FIR echo filter taps
@@ -1180,6 +1201,23 @@ WaitForEcho:
 	BNE	.w2
 	RET
 ; =============================================================================
+RestoreEcho:
+	CLR6	GlobalFlags
+
+	MOV	DSPAddr, #$4D
+	MOV	DSPData, EchoOnShadow	; Restore echo enable flags.
+
+	MOV	X, #7
+	MOV	DSPAddr, #$8F	; FIR 8th tap + $10.
+	SETC
+-	SBC	DSPAddr, #$10
+	MOV	A, SndFIRShadow+X
+	NOP			; Delay.
+	MOV	DSPData, A
+	DEC	X
+	BPL	-
+	RET
+; =============================================================================
 SetEchoDelay:	; $CA0
 	CALL	ResetEcho
 
@@ -1200,33 +1238,17 @@ SetEchoDelay:	; $CA0
 	LSR	A
 	MOV	DSPData, A
 
-	; Clear the echo buffer and FIR filter queue.
-	MOV	A, #$FE
-	CALL	WaitForEcho
-	MOV	A, #8
-	CALL	WaitForEcho
-	;CALL	WaitForEcho_retry
+	; Set a flag in the echo buffer.
+	; We will be waiting until it is cleared.
+	MOV	A, #1
+	MOV	EchoBufEnd, A
 
-	MOV	DSPAddr, #$4D
-	MOV	DSPData, 3	; restore echo enable flags
+	SET6	GlobalFlags
 
-	; Restore echo FIR filter taps.
-	MOV	X, #8
-	MOV	DSPAddr, #$7F	; FIR 8th tap
-	SETC
--	DEC	X
-	MOV	A, SndFIRShadow+X
-	MOV	DSPData, A
-	SBC	DSPAddr, #$10
-	BPL	-
-
-	MOV	Timer0, #1
-	MOV	Timer1, #1
-	MOV	ControlReg, #3	; Restart timers 0 and 1
-	CALL	TempoToInterval2
-	MOV	Timer1, #100	; Set timer 1 to 12.5 ms
-
-+	JMP	IncAndFinishEvent
+	JMP	IncAndFinishEvent
+; =============================================================================
++	CALL	RestoreEcho
+	JMP	IncAndFinishEvent
 ; =============================================================================
 Jump:	; $CD7
 	MOV	A, (0)+Y	; LSB
@@ -1274,16 +1296,15 @@ RetSub:	; $D34
 	MOV	X, CurrentTrack
 
 	MOV	Y, SndStackPtr+X
-	DEC	Y
-	MOV	A, Stack_PtrL+Y	; LSB
+	MOV	A, Stack_PtrL-1+Y	; LSB
 	MOV	0, A
-	MOV	A, Stack_PtrH+Y	; MSB
+	MOV	A, Stack_PtrH-1+Y	; MSB
 	MOV	1, A
 
-	MOV	A, Stack_RepCnt+Y
+	MOV	A, Stack_RepCnt-1+Y
 	DEC	A	; decrement repeat count
 	BEQ	+
-	MOV	Stack_RepCnt+Y, A
+	MOV	Stack_RepCnt-1+Y, A
 
 	; Repeat the subroutine.
 	MOV	Y, #1
@@ -1295,7 +1316,7 @@ RetSub:	; $D34
 	MOV	1, 2
 	JMP	FinishEvent
 ; -----------------------------------------------------------------------------
-+	MOV	SndStackPtr+X, Y
++	DEC	SndStackPtr+X
 	MOV	Y, #2
 	JMP	FinishEvent
 ; =============================================================================
@@ -1371,7 +1392,6 @@ SetTempo:	; $DEB
 ; =============================================================================
 AddTempo:	; $DF8
 	MOV	A, (0)+Y
-	CLRC
 	ADC	A, BGMTempo
 	MOV	BGMTempo, A
 	CALL	TempoToInterval
@@ -1448,7 +1468,6 @@ SetTranspose:	; $E7B
 AddTranspose:	; $E88
 	MOV	X, CurrentTrack
 	MOV	A, (0)+Y
-	CLRC
 	ADC	A, Transpose+X
 	MOV	Transpose+X, A
 	JMP	IncAndFinishEvent
@@ -1481,12 +1500,12 @@ EchoOff:	; $EDC
 EchoFilter:	; $EF6
 	MOV	X, #0
 	MOV	DSPAddr, #$F	; FIR 1st tap
-	CLRC
 
 -	MOV	A, (0)+Y
 	MOV	SndFIRShadow+X, A
+	BBS6	GlobalFlags, +
 	MOV	DSPData, A
-	INC	X
++	INC	X
 	INC	Y
 	ADC	DSPAddr, #$10
 	BPL	-
@@ -1552,52 +1571,60 @@ LongDurationOff:	; $F86
 	JMP	FinishEvent
 ; =============================================================================
 SetUpEngine:	; $100B
-	MOV	A, #0
-	MOV	DSPAddr, #$D	; Echo feedback
-	MOV	DSPData, A
-	;MOV	DSPAddr, #$4D	; Echo enable
-	;MOV	DSPData, A
-	MOV	DSPAddr, #$5C	; Key-off
-	MOV	DSPData, #-1
-	MOV	DSPAddr, #$2C	; Echo left channel
-	MOV	DSPData, A
-	MOV	DSPAddr, #$3C	; Echo right channel
-	MOV	DSPData, A
-	;MOV	DSPAddr, #$3D	; Noise enable
-	;MOV	DSPData, A
-	MOV	DSPAddr, #$2D	; Pitch modulation which is unused
-	MOV	DSPData, A
-	MOV	DSPAddr, #$5D	; sample pointer table location
-	MOV	DSPData, #$31
-	MOV	DSPAddr, #$C	; Master left channel
-	MOV	DSPData, #64
-	MOV	DSPAddr, #$1C	; Master right channel
-	MOV	DSPData, #64
-	MOV	DSPAddr, #$6C	; DSP flags
-	MOV	DSPData, A
+	BBC5	GlobalFlags, +
 
+	MOV	Timer1, #100
+
+	MOV	Y, #64
+	MOV	A, #$C		; Master left volume
+	MOVW	DSPAddr, YA
+	MOV	A, #$1C		; Master right volume
+	MOVW	DSPAddr, YA
+
+	MOV	A, #$5D		; Source directory
+	MOV	Y, #SourceDir>>8
+	MOVW	DSPAddr, YA
+
+	MOV	A, #$2D		; Pitch modulation which is unused
+	MOV	Y, #0
+	MOVW	DSPAddr, YA
+
+	MOV	A, #$F		; FIR filter
+	CLRC
+-	MOVW	DSPAddr, YA
+	ADC	A, #$10
+	BPL	-
+
+	MOV	A, Y
+	MOV	Y, #8
+-	MOV	SndFIRShadow-1+Y, A
+	DBNZ	Y, -
+
+	MOV	Y, A
+	MOV	A, #$6C		; DSP flags
+	MOVW	DSPAddr, YA
+
++	MOV	A, #$5C		; Key-off
+	MOV	Y, #-1
+	MOVW	DSPAddr, YA
+
+	MOV	A, #0
 	MOV	ControlReg, A
-	MOV	Timer0, #1
-	MOV	Timer1, #1
-	MOV	GlobalFlags, A
-	MOV	SndNewPitchOffset, A	; clear pitch offset for SFX channel #5
-	MOV	SndNewPitchOffset+1, A
-	MOV	SndPitchOffset, A
-	MOV	SndPitchOffset+1, A
-	MOV	Timer0Ticks, A
-	MOV	Timer1Ticks, A
+	MOV	Y, A
+	MOVW	GlobalFlags, YA		; Also clears CurPreprocTrack.
+	MOVW	Timer0Ticks, YA		; Also clears Timer1Ticks.
+	MOVW	SndNewPitchOffset, YA	; clear pitch offset for SFX channel #5
+	MOVW	SndPitchOffset, YA
 	MOV	SFXCount, #1
-	MOV	CurPreprocTrack, A
+	MOV	EchoOnShadow, A
 
 	MOV	BGMVol, #100
 
 	;mov	A, #0
 	MOV	0, #8
 	MOV	X, A
-	MOV	Y, A
-	MOV	1, Y
-loc_10A9:
-	MOV	A, #1
+
+-	MOV	A, #1
 	MOV	NoteDur_L+X, A	; set delay duration to 1
 	MOV	SndFlags+X, A
 	MOV	A, (2)+Y
@@ -1605,7 +1632,10 @@ loc_10A9:
 	INC	Y
 	MOV	A, (2)+Y
 	MOV	TrkPtr_H+X, A
-	MOV	A, 1
+	MOV	A, X
+	ASL	A
+	ASL	A
+	ASL	A
 	MOV	SndStackPtr+X, A
 	MOV	A, #0
 	MOV	NoteDur_H+X, A
@@ -1616,16 +1646,16 @@ loc_10A9:
 	MOV	SndFineTune+X, A
 	MOV	PitchSlideDelta+X, A
 	MOV	VibDelta+X, A
-	; set ADSR to $8E-$C1
-	MOV	A, #$8E
+
+	; set ADSR to $FE-$C1
+	MOV	A, #$FE
 	MOV	SndADSR1+X, A
 	MOV	A, #$C1
 	MOV	SndADSR2+X, A
+
 	INC	X
 	INC	Y
-	CLRC
-	ADC	1, #8
-	DBNZ	0, loc_10A9
+	DBNZ	0, -
 
 	MOV	A, (2)+Y
 	MOV	BGMTempo, A
@@ -1639,14 +1669,14 @@ SetUpSFX:	; $10F7
 	CMP	A, #$60
 	BPL	loc_1104	; branch if ID >= $60
 
-	CMP	A, $2410
+	CMP	A, SFX_IndexBound0
 	BPL	loc_110D	; out of range if ID >= bound
 	JMP	loc_1111
 ; -----------------------------------------------------------------------------
 loc_1104:
 	SETC
 	SBC	A, #$60
-	CMP	A, $2E94
+	CMP	A, SFX_IndexBound1
 	BMI	loc_1111	; out of range if ID >= bound
 
 loc_110D:
@@ -1656,7 +1686,14 @@ loc_1111:
 
 	MOV	A, X
 	XCN	A
-	CALL	SoftKeyRelease3
+	OR	A, #7
+	MOV	DSPAddr, A
+	MOV	DSPData, #$9F
+	SETC
+	SBC	DSPAddr, #2
+	CLR7	DSPData
+	MOV	A, #127
+	MOV	SndEnvLvl+8+X, A
 
 	MOV	A, SndFlags+X
 	OR	A, SndFlags+8+X
@@ -1684,20 +1721,20 @@ loc_1111:
 	MOV	PitchSlideDelta+8+X, A
 	MOV	VibDelta+8+X, A
 
-	; set center volume to 127
-	MOV	A, #127
+	; set center volume to -128
+	MOV	A, #-128
 	MOV	SndVol_L+8+X, A
 	MOV	SndVol_R+8+X, A
 
-	; set ADSR to $8E-$C1
-	MOV	A, #$8E
+	; set ADSR to $FE-$C1
+	MOV	A, #$FE
 	MOV	SndADSR1+8+X, A
 	MOV	A, #$C1
 	MOV	SndADSR2+8+X, A
 
 	; Arpeggiate composite SFXs
-	INC	SFXCount
 	MOV	A, SFXCount
+	INC	SFXCount
 	MOV	NoteDur_L+8+X, A
 
 	; set track pointer
@@ -1706,20 +1743,18 @@ loc_1111:
 	CMP	A, #$C0	; $60
 	BCS	+
 	MOV	Y, A
-	MOV	A, $2412+Y
+	MOV	A, SFX_PtrTable0+Y
 	MOV	TrkPtr_L+8+X, A
-	INC	Y
-	MOV	A, $2412+Y
+	MOV	A, SFX_PtrTable0+1+Y
 	MOV	TrkPtr_H+8+X, A
 	RET
 ; -----------------------------------------------------------------------------
 +	SETC
 	SBC	A, #$C0
 	MOV	Y, A
-	MOV	A, $2E96+Y
+	MOV	A, SFX_PtrTable1+Y
 	MOV	TrkPtr_L+8+X, A
-	INC	Y
-	MOV	A, $2E96+Y
+	MOV	A, SFX_PtrTable1+1+Y
 	MOV	TrkPtr_H+8+X, A
 	RET
 ; =============================================================================

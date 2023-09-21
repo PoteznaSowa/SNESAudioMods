@@ -1,4 +1,4 @@
-; Modified Rare's Donkey Kong Country.
+; Modified Rare's Donkey Kong Country sound engine.
 ; Based on Donkey Kong Country sound engine disassembly.
 ; Author: PoteznaSowa.
 
@@ -31,7 +31,7 @@ PrevMsg:		skip 1
 ; 1: halve BGM tempo
 ; 2: if bit 1 is set, skip BGM updates
 ; 3: events are being preprocessed
-; 4: monaural mode
+; 4: cold reset
 GlobalFlags:	skip 1
 
 CurPreprocTrack:	skip 1	; number of channel to be preprocessed
@@ -213,12 +213,12 @@ ProgramStart:
 GetMessage:	; $606
 	CMP	Port0, PrevMsg	; has SNES sent next message?
 	BEQ	MainLoop	; branch if no
+GetMessage2:
 	MOV	A, Port1	; read message
 	MOV	X, Port2
 	MOV	Y, Port0	; read messsage ID again
 	MOV	Port0, Y	; reply to SNES
 	MOV	PrevMsg, Y	; store message ID
-	CLR4	CurPreprocTrack
 
 	CMP	A, #$FF
 	BEQ	GotoTransferMode
@@ -240,30 +240,28 @@ GetMessage:	; $606
 ; -----------------------------------------------------------------------------
 GotoTransferMode:	; $71F
 	MOV	X, #0
-	MOV	Port1, X
-	MOV	DSPAddr, #$5C	; key-off
-	MOV	DSPData, #-1	; mute all channels
-	MOV	DSPAddr, #$D	; echo feedback
-	MOV	DSPData, X
+	MOV	Port1, X	; Tell SNES we are in transfer mode.
+	MOV	A, #$5C
+	MOV	Y, #-1
+	MOVW	DSPAddr, YA	; Key-off all channels.
+	MOV	DSPAddr, #$D
+	MOV	DSPData, X	; Set echo feedback to 0.
 	JMP	TransferMode
 ; -----------------------------------------------------------------------------
 StartSound:	; $643
-	MOV	ControlReg, #0
 	SET0	GlobalFlags
 	CALL	TempoToInterval2
-	MOV	Timer1, #20
-	MOV	ControlReg, #3
+	MOV	ControlReg, #3	; Start timers 0 and 1.
 	JMP	GetMessage
 ; =============================================================================
 MainLoop:	; $649
 	BBC0	GlobalFlags, PreprocessTracks
 
-	CLR3	GlobalFlags
-
 	CLRC
 	ADC	Timer0Ticks, Timer0_out	; has the BGM timer ticked?
 	BEQ	SkipBGMUpdate		; branch if no
 
+UpdateBGM:
 	BBC1	GlobalFlags, +	; Branch if tempo not halved.
 	BBS2	GlobalFlags, ++	; Skip updates every second tick.
 
@@ -271,17 +269,17 @@ MainLoop:	; $649
 	CALL	UpdateTracks
 
 ++	DEC	Timer0Ticks
-	EOR	GlobalFlags, #4
-	CLR4	CurPreprocTrack
+	EOR	GlobalFlags, #4	; Toggle the "skip tick" flag.
 
 SkipBGMUpdate:
 	CMP	Port0, PrevMsg	; has SNES sent next message?
-	BNE	GetMessage	; branch if yes
+	BNE	GetMessage2	; branch if yes
 
 	CLRC
 	ADC	Timer1Ticks, Timer1_out	; has the main timer ticked?
 	BEQ	PreprocessTracks	; branch if no
 
+UpdateSFX:
 	DBNZ	SFXDivCounter, +
 	MOV	SFXDivCounter, #8
 
@@ -293,25 +291,19 @@ SkipBGMUpdate:
 
 	MOV	CurrentTrack, #0
 	MOV	DSPAddr, #0	; Go to channel #0 volume
-	JMP	+	; Loop optimisation.
+	JMP	+	; Loop optimisation. Saves 10 cycles.
 ; -----------------------------------------------------------------------------
 UpdateTracks2:
 	CLR3	CurrentTrack	; revert to BGM
 	INC	CurrentTrack
 	AND	DSPAddr, #$70
 	
-+	MOV	X, CurrentTrack
-	MOV	A, SndFlags+X
-	AND	A, #$20		; is the channel used by SFX?
-	BEQ	+		; branch if no
-	SET3	CurrentTrack	; process a SFX channel instead
 +	CALL	UpdateTrack2	; update pitch bend
-	ADC	DSPAddr, #$10	; Go to next channel
-	BPL	UpdateTracks2
+	ADC	DSPAddr, #$10	; Go to next channel.
+	BPL	UpdateTracks2	; ...if any.
 
 FinishSFX:
 	DEC	Timer1Ticks
-	CLR4	CurPreprocTrack
 
 ; If we have finished all pending tasks above, try to asynchronously process
 ; sound data for each channel in a round-robin manner.
@@ -323,8 +315,6 @@ FinishSFX:
 ; processing the events and preparing to play a note, whenever we can.
 ; The result is much less lag and thus smoother rhythm.
 PreprocessTracks:
-	BBS4	CurPreprocTrack, Goto_GetMessage
-
 	CMP	Port0, PrevMsg	; has SNES sent next message?
 	BNE	Goto_GetMessage	; branch if yes
 
@@ -332,11 +322,12 @@ PreprocessTracks:
 
 	CLRC
 	ADC	Timer0Ticks, Timer0_out	; has the BGM timer ticked?
-	BNE	Goto_GetMessage		; branch if yes
+	BNE	UpdateBGM		; branch if yes
 	ADC	Timer1Ticks, Timer1_out	; has the main timer ticked?
-	BNE	Goto_GetMessage		; branch if yes
+	BNE	UpdateSFX		; branch if yes
 
-+	MOV	X, CurPreprocTrack
++	CLR4	CurPreprocTrack
+	MOV	X, CurPreprocTrack
 	INC	CurPreprocTrack
 
 	MOV	A, SndFlags+X	; Load track flags.
@@ -425,7 +416,7 @@ Preproc_Rest:
 	MOV	A, NoteDur_L+X
 	MOV	Y, NoteDur_H+X
 	ADDW	YA, 2	; Add the rest length to the current rest duration.
-	BCS	+	; Branch if the result does not fit into 16 bits.
+	BCS	FinishPreproc	; Branch if the result does not fit into 16 bits.
 	MOV	NoteDur_L+X, A	; Store the result.
 	MOV	NoteDur_H+X, Y
 	MOV	A, 4
@@ -433,7 +424,7 @@ Preproc_Rest:
 	ADDW	YA, 0	; Add the track offset the pointer.
 	MOV	TrkPtr_L+X, A	; store pointer LSB
 	MOV	TrkPtr_H+X, Y	; store pointer MSB
-+	JMP	FinishPreproc
+	JMP	FinishPreproc
 ; =============================================================================
 SoftKeyRelease:
 	BBS5	TempFlags, +	; Skip if channel in use by SFX.
@@ -475,6 +466,7 @@ UpdateTracks:
 	MOV	CurVoiceBit, #1
 	MOV	CurVoiceAddr, #0
 	MOV	KeyOnShadow, #0
+	CLR3	GlobalFlags
 	JMP	+	; Loop optimisation. Saves 6 cycles.
 ; -----------------------------------------------------------------------------
 NextTrack:
@@ -505,12 +497,9 @@ NextTrack:
 	BNE	+
 	BBS6	TempFlags, +	; Branch if a note is ready for key-on.
 	CALL	SoftKeyRelease
-+
-FinishTrackUpdate:
-	MOV	A, TempFlags	; Save track flags.
-	MOV	SndFlags+X, A
 
-	ASL	CurVoiceBit	; Go to the next track.
+FinishTrackUpdate:
++	ASL	CurVoiceBit	; Go to the next track.
 	BCC	NextTrack	; ...if any.
 
 	; Now write the key-on mask to the DSP.
@@ -521,7 +510,7 @@ FinishTrackUpdate:
 	MOV	A, #$4C
 	MOVW	DSPAddr, YA
 +	RET
-; =============================================================================
+; -----------------------------------------------------------------------------
 FetchNextEvent:
 	MOV	A, TrkPtr_L+X	; Load track data pointer.
 	MOV	Y, TrkPtr_H+X
@@ -560,7 +549,7 @@ FinishEvent:
 ProcessRest:
 	CALL	SoftKeyRelease2
 	JMP	SetDuration
-; =============================================================================
+; -----------------------------------------------------------------------------
 GotNote:
 	MOV	X, CurrentTrack
 	BBS5	TempFlags, SetDuration
@@ -599,6 +588,8 @@ SetDuration:
 	ADDW	YA, 0
 	MOV	TrkPtr_L+X, A	; store pointer LSB
 	MOV	TrkPtr_H+X, Y	; store pointer MSB
+	MOV	A, TempFlags
+	MOV	SndFlags+X, A
 	JMP	FinishTrackUpdate
 ; =============================================================================
 PrepareNote:
@@ -742,6 +733,11 @@ TuningDone:
 UpdateTrack2:	; $91C
 	MOV	X, CurrentTrack
 	MOV	A, SndFlags+X
+	AND	A, #$20		; is the channel used by SFX?
+	BEQ	+		; branch if no
+	SET3	CurrentTrack	; process a SFX channel instead
+	MOV	X, CurrentTrack
++	MOV	A, SndFlags+X
 	BMI	+
 	RET
 ; -----------------------------------------------------------------------------
@@ -890,12 +886,12 @@ EndOfTrack:
 	AND	A, #$DF
 	MOV	SndFlags-8+X, A
 
-.ret:	BBS3	GlobalFlags, +
+.ret:	MOV	A, TempFlags
+	MOV	SndFlags+X, A
+	BBS3	GlobalFlags, +
 	JMP	FinishTrackUpdate
 ; -----------------------------------------------------------------------------
-+	MOV	A, TempFlags
-	MOV	SndFlags+X, A
-	JMP	GetMessage
++	JMP	GetMessage
 ; =============================================================================
 SetVoice:	; $ABA
 	MOV	X, CurrentTrack
@@ -904,7 +900,7 @@ SetVoice:	; $ABA
 	MOV	A, #0
 	MOV	SndFineTune+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 SetVolume:	; $AE3
 	MOV	X, CurrentTrack
 	MOV	A, (0)+Y
@@ -913,7 +909,7 @@ SetVolume:	; $AE3
 	MOV	A, (0)+Y
 	MOV	SndVol_R+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 JumpTrack:	; $B14
 	MOV	A, (0)+Y	; LSB
 	MOV	2, A
@@ -923,7 +919,7 @@ JumpTrack:	; $B14
 	MOV	0, 2
 	MOV	Y, #0
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 CallSub:	; $B29
 	MOV	A, (0)+Y	; repeat count
 	MOV	2, A
@@ -950,21 +946,20 @@ CallSub:	; $B29
 	MOV	A, (3)+Y	; LSB
 	MOV	0, A
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
 RetSub:	; $B5E
 	MOV	X, CurrentTrack
 
 	MOV	Y, SndStackPtr+X
-	DEC	Y
-	MOV	A, Stack_PtrL+Y	; LSB
+	MOV	A, Stack_PtrL-1+Y	; LSB
 	MOV	0, A
-	MOV	A, Stack_PtrH+Y	; MSB
+	MOV	A, Stack_PtrH-1+Y	; MSB
 	MOV	1, A
 
-	MOV	A, Stack_RepCnt+Y
+	MOV	A, Stack_RepCnt-1+Y
 	DEC	A	; decrement repeat count
 	BEQ	+
-	MOV	Stack_RepCnt+Y, A
+	MOV	Stack_RepCnt-1+Y, A
 
 	; Repeat the subroutine.
 	MOV	Y, #1
@@ -976,7 +971,7 @@ RetSub:	; $B5E
 	MOV	1, 2
 	JMP	FinishEvent
 ; -----------------------------------------------------------------------------
-+	MOV	SndStackPtr+X, Y
++	DEC	SndStackPtr+X
 	MOV	Y, #2
 	JMP	FinishEvent
 ; =============================================================================
@@ -996,7 +991,7 @@ DefaultDurOff:	; $BC9
 	MOV	DfltNoteDur_L+X, A
 	MOV	DfltNoteDur_H+X, A
 	JMP	FinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 PitchSlideUp:	; $BD5
 	MOV	X, CurrentTrack
 	MOV	A, (0)+Y	; delay
@@ -1134,7 +1129,7 @@ SetEchoParams:	; $D71
 	MOV	A, (0)+Y
 	MOV	DSPData, A
 	JMP	IncAndFinishEvent
-; -----------------------------------------------------------------------------
+; =============================================================================
 EchoOn:		; $DA0
 	SET2	TempFlags
 	JMP	FinishEvent
@@ -1154,13 +1149,13 @@ SetFIR:		; $DD8
 	BPL	-
 
 	JMP	FinishEvent
-; -----------------------------------------------------------------------------
+; =============================================================================
 SetNoise:	; $DF8
 	MOV	A, (0)+Y
 	MOV	DSPAddr, #DSP_Flags
 	MOV	DSPData, A
 	JMP	IncAndFinishEvent
-; -----------------------------------------------------------------------------
+; =============================================================================
 NoiseOn:	; $E12
 	SET3	TempFlags
 	JMP	FinishEvent
@@ -1218,7 +1213,7 @@ VoiceAndVolume:	; $F0E
 	MOV	A, #0
 	MOV	SndFineTune+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 LongNoteOn:	; $F72
 	SET1	TempFlags
 	JMP	FinishEvent
@@ -1241,7 +1236,7 @@ SetTremolo:	; $FBE
 	MOV	A, (0)+Y	; delay
 	MOV	TremDelay+X, A
 	JMP	IncAndFinishEvent
-;-----------------------------------------------------------------------------
+; =============================================================================
 TremoloOff:	; $FF8
 	MOV	X, CurrentTrack
 	MOV	A, #0
@@ -1358,6 +1353,8 @@ SetUpEngine:	; $1076
 	MOV	Y, #0
 	BBC4	GlobalFlags, +	; skip some init on warm reset
 
+	MOV	Timer1, #20	; Set timer 1 to 2.5 ms.
+
 	MOV	A, #$D		; echo feedback
 	MOVW	DSPAddr, YA	; = 0
 	MOV	A, #$4D		; echo enable
@@ -1393,11 +1390,12 @@ SetUpEngine:	; $1076
 	MOVW	DSPAddr, YA
 
 	MOV	A, Y	; A = 0
+	MOV	ControlReg, A
 	MOVW	GlobalFlags, YA		; Also clears CurPreprocTrack.
+	MOVW	Timer0Ticks, YA		; Also clears Timer1Ticks.
 
 	INC	A	; A = 1
 	MOV	Y, A	; Y = 1
-	MOVW	Timer0Ticks, YA		; Also sets Timer1Ticks.
 	MOVW	SFXDivCounter, YA	; Also sets MiscDivCounter
 
 	MOV	X, #7
@@ -1447,7 +1445,14 @@ PlaySFX:	; $1178
 
 	MOV	A, X
 	XCN	A
-	CALL	SoftKeyRelease3
+	OR	A, #7
+	MOV	DSPAddr, A
+	MOV	DSPData, #$9F
+	SETC
+	SBC	DSPAddr, #2
+	CLR7	DSPData
+	MOV	A, #127
+	MOV	SndEnvLvl+8+X, A
 
 	MOV	A, SndFlags+X
 	OR	A, SndFlags+8+X
@@ -1475,9 +1480,11 @@ PlaySFX:	; $1178
 	MOV	PitchSlideDelta+8+X, A
 	MOV	VibDelta+8+X, A
 	MOV	TremDelta+8+X, A
+	INC	A	; A = 1
+	MOV	NoteDur_L+8+X, A
 
-	; set center volume to 127
-	MOV	A, #127
+	; set center volume to -128
+	MOV	A, #-128
 	MOV	SndVol_L+8+X, A
 	MOV	SndVol_R+8+X, A
 
@@ -1490,11 +1497,8 @@ PlaySFX:	; $1178
 	; set track pointer
 	MOV	A, SFXData+Y
 	MOV	TrkPtr_L+8+X, A
-	INC	Y
-	MOV	A, SFXData+Y
+	MOV	A, SFXData+1+Y
 	MOV	TrkPtr_H+8+X, A
-	MOV	A, #2
-	MOV	NoteDur_L+8+X, A
 	RET
 ;-----------------------------------------------------------------------------
 PitchTable:	; $11E6
