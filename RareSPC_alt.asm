@@ -194,12 +194,8 @@ TransferMode:
 ; -----------------------------------------------------------------------------
 +	MOV	Port0, Y
 	MOV	PrevMsg, Y
-
-	;MOV	PrevMsg, Y		; store previous message
-	;JMP	(Port2+X)		; run program at the address from IOPort2
 	JMP	ProgramStart
 ; -----------------------------------------------------------------------------
-	;rep 4 : db 0
 	rep 12 : db 0	; must be at least 8
 ; -----------------------------------------------------------------------------
 TimbreLUT:
@@ -459,12 +455,11 @@ Preproc_Rest:
 ; =============================================================================
 SoftKeyRelease:
 	BBS5	TempFlags, +	; Skip if channel in use by SFX.
-SoftKeyRelease2:
+	BBS6	TempFlags, +	; Skip if a note is ready for key-on.
 	MOV	A, CurVoiceAddr
-SoftKeyRelease3:
 	OR	A, #7
-	MOV	DSPAddr, A
-	MOV	DSPData, #$BF
+	MOV	Y, #$BF		; Exponential fade-out, rate 15
+	MOVW	DSPAddr, YA
 	CLR1	DSPAddr
 	CLR7	DSPData
 	MOV	A, #127
@@ -507,29 +502,26 @@ NextTrack:
 
 	MOV	A, SndFlags+X	; Load track flags.
 	MOV	TempFlags, A
-	BBC0	TempFlags, +	; Branch if track inactive.
+	BBC0	TempFlags, FinishTrackUpdate	; Branch if track inactive.
 
-	MOV	A, NoteDur_L+X	; Load note/rest duration.
-	MOV	Y, NoteDur_H+X
-	MOVW	0, YA
-	MOVW	YA, 0		; Is it zero?
-	BEQ	FetchNextEvent	; Branch if yes.
-	DECW	0		; Decrement it.
-	BEQ	FetchNextEvent	; Branch if it became zero.
-	MOVW	YA, 0
-	MOV	NoteDur_L+X, A	; Save note/rest duration.
-	MOV	NoteDur_H+X, Y
-
-	; Release key on the last tick.
-	CMP	A, #1
-	BNE	+
-	MOV	A, Y
-	BNE	+
-	BBS6	TempFlags, +	; Branch if a note is ready for key-on.
+	MOV	Y, NoteDur_L+X
+	CMP	Y, #3
+	BCS	ContinueNote
+	MOV	A, NoteDur_H+X
+	CMP	A, #1		; C = (A >= 1)
+	DEC	Y
+	BPL	+
+	BCC	FetchNextEvent
+	DEC	NoteDur_H+X
+	JMP	ContinueNote
+; -----------------------------------------------------------------------------
++	BCS	ContinueNote
+	BEQ	FetchNextEvent
 	CALL	SoftKeyRelease
-
+ContinueNote:
+	DEC	NoteDur_L+X
 FinishTrackUpdate:
-+	ASL	CurVoiceBit	; Go to the next track.
+	ASL	CurVoiceBit	; Go to the next track.
 	BCC	NextTrack	; ...if any.
 
 	; Now write the key-on mask to the DSP.
@@ -542,6 +534,7 @@ FinishTrackUpdate:
 +	RET
 ; -----------------------------------------------------------------------------
 FetchNextEvent:
+	CALL	SoftKeyRelease
 	MOV	A, TrkPtr_L+X	; Load track data pointer.
 	MOV	Y, TrkPtr_H+X
 	MOVW	0, YA
@@ -575,16 +568,11 @@ FinishEvent:
 	MOV	SndFlags+X, A
 	RET
 ; =============================================================================
-; Key-off and set rest duration.
-ProcessRest:
-	CALL	SoftKeyRelease2
-	JMP	SetDuration
-; -----------------------------------------------------------------------------
 GotNote:
 	MOV	X, CurrentTrack
 	BBS5	TempFlags, SetDuration
 	CMP	A, #$80			; is the event a rest?
-	BEQ	ProcessRest		; if yes, branch
+	BEQ	SetDuration		; if yes, branch
 
 	MOV	5, Y	; Preserve Y.
 	CALL	PrepareNote
@@ -903,7 +891,6 @@ EndOfTrack:
 	MOV	X, CurrentTrack
 	BBS5	TempFlags, +
 	BBC7	TempFlags, +
-	CALL	SoftKeyRelease2
 	MOV	A, CurVoiceAddr
 	OR	A, #8
 	MOV	DSPAddr, A
@@ -1074,7 +1061,6 @@ SetTempo:	; $DEB
 ; =============================================================================
 AddTempo:	; $DF8
 	MOV	A, (0)+Y
-	CLRC
 	ADC	A, BGMTempo
 	MOV	BGMTempo, A
 	CALL	TempoToInterval
@@ -1139,7 +1125,6 @@ SetTranspose:	; $D45
 AddTranspose:	; $D59
 	MOV	X, CurrentTrack
 	MOV	A, (0)+Y
-	CLRC
 	ADC	A, Transpose+X
 	MOV	Transpose+X, A
 	JMP	IncAndFinishEvent
@@ -1170,7 +1155,6 @@ EchoOff:	; $DBB
 ; =============================================================================
 SetFIR:		; $DD8
 	MOV	DSPAddr, #DSP_FIR
-	CLRC
 
 -	MOV	A, (0)+Y
 	MOV	DSPData, A
@@ -1475,9 +1459,8 @@ PlaySFX:	; $1178
 	XCN	A
 	OR	A, #7
 	MOV	DSPAddr, A
-	MOV	DSPData, #$9F
-	SETC
-	SBC	DSPAddr, #2
+	MOV	DSPData, #$9F	; Linear fade-out, rate 15
+	CLR1	DSPAddr
 	CLR7	DSPData
 	MOV	A, #127
 	MOV	SndEnvLvl+8+X, A
