@@ -37,10 +37,8 @@ GlobalFlags:	skip 1
 CurPreprocTrack:	skip 1	; number of channel to be preprocessed
 
 BGMTempo:	skip 1
-Timer0Ticks:	skip 1
-Timer1Ticks:	skip 1
-SFXDivCounter:		skip 1	; must be 1..8
-MiscDivCounter:		skip 1	; must be 1..5
+SFXDivCounter:		skip 1
+MiscDivCounter:		skip 1
 
 	ORG	$20
 
@@ -59,11 +57,11 @@ TrkPtr_L:	skip 16	; track pointer
 TrkPtr_H:	skip 16
 SndTimbre:	skip 16	; instrument
 SndFineTune:	skip 16	; pitch tuning
-t_PitchSlideTimer:	skip 16	; pitch slide timer
+t_PitchSlideTimer:	skip 16	; ticks before next pitch slide step
 t_PitchSlideSteps:	skip 16	; pitch slide steps left
-t_VibTimer:	skip 16	; vibrato interval timeout
+t_VibTimer:	skip 16	; ticks before next vibrato step
 t_VibSteps:	skip 16	; vibrato cycle steps left
-t_TremTimer:	skip 16
+t_TremTimer:	skip 16	; ticks before next tremolo step
 SndStackPtr:	skip 16	; current stack pointer
 
 
@@ -95,10 +93,6 @@ SndVol_R:	skip 16	; right channel volume
 SndADSR1:	skip 16	; ADSR 1 value
 SndADSR2:	skip 16	; ADSR 2 value
 
-t_PitchSlideDelay:	skip 16	; pitch slide delay timeout
-t_VibDelay:	skip 16	; vibrato delay timeout
-t_PitchSlideStepsDown:	skip 16	; pitch slide down steps left
-
 DfltNoteDur_L:	skip 16	; Current default duration.
 DfltNoteDur_H:	skip 16
 
@@ -115,7 +109,6 @@ VibDelta:	skip 16	; vibrato pitch delta (linear, signed)
 
 SndEnvLvl:	skip 16	; current ADSR envelope level
 
-t_TremDelay:		skip 16	; $2A4
 TremInterval:		skip 16	; $2C4
 TremDelta:		skip 16	; $2D4
 t_TremLen:		skip 16	; $2E4
@@ -206,6 +199,7 @@ ProgramStart:
 	MOV	X, #$F
 	MOV	SP, X	; SP = $010F
 	CALL	SetUpEngine
+	CALL	TempoToInterval2
 
 GetMessage:	; $606
 	CMP	Port0, PrevMsg	; has SNES sent next message?
@@ -271,46 +265,46 @@ GotoTransferMode:	; $71F
 ; -----------------------------------------------------------------------------
 StartSound:	; $643
 	SET0	GlobalFlags
-	CALL	TempoToInterval2
--	CALL	PreprocessTracks2
-	BBC3	CurPreprocTrack, -
 	MOV	ControlReg, #3	; Start timers 0 and 1.
 	JMP	GetMessage
 ; =============================================================================
+
+; Events are strictly prioritised in the following order:
+; - messsages from SNES;
+; - Timer 0 (BGM) ticks;
+; - Timer 1 (SFX) ticks.
+; If none is happening at the moment, do one iteration of asynchronous sound
+; sequence processing.
 MainLoop:	; $649
 	BBC0	GlobalFlags, PreprocessTracks
 
-	CLRC
-	ADC	Timer0Ticks, Timer0_out	; has the BGM timer ticked?
-	BEQ	SkipBGMUpdate		; branch if no
-
-UpdateBGM:
+	MOV	A, Timer0_out	; has the BGM timer ticked?
+	BEQ	SkipBGMUpdate	; branch if no
 	BBC1	GlobalFlags, +	; Branch if tempo not halved.
 	BBS2	GlobalFlags, ++	; Skip updates every second tick.
-
 +	MOV	CurrentTrack, #0
 	CALL	UpdateTracks
-
-++	DEC	Timer0Ticks
-	EOR	GlobalFlags, #4	; Toggle the "skip tick" flag.
-
+++	EOR	GlobalFlags, #4	; Toggle the "skip tick" flag.
+	JMP	GetMessage
+; -----------------------------------------------------------------------------
 SkipBGMUpdate:
-	CMP	Port0, PrevMsg	; has SNES sent next message?
-	BNE	GetMessage2	; branch if yes
-
-	CLRC
-	ADC	Timer1Ticks, Timer1_out	; has the main timer ticked?
+	MOV	A, Timer1_out		; has the main timer ticked?
 	BEQ	PreprocessTracks	; branch if no
+	MOV	0, A
+	CLRC
+	ADC	SFXDivCounter, 0
+	ADC	MiscDivCounter, 0
 
-UpdateSFX:
-	DBNZ	SFXDivCounter, +
-	MOV	SFXDivCounter, #8
+	CMP	SFXDivCounter, #8
+	BCC	+
+	SBC	SFXDivCounter, #8
 
 	MOV	CurrentTrack, #8
 	CALL	UpdateTracks
 
-+	DBNZ	MiscDivCounter, FinishSFX
-	MOV	MiscDivCounter, #5
++	CMP	MiscDivCounter, #5
+	BCC	FinishSFX
+	SBC	MiscDivCounter, #5
 
 	MOV	CurrentTrack, #0
 	MOV	DSPAddr, #0	; Go to channel #0 volume
@@ -326,7 +320,8 @@ UpdateTracks2:
 	BPL	UpdateTracks2	; ...if any.
 
 FinishSFX:
-	DEC	Timer1Ticks
+	JMP	GetMessage
+; -----------------------------------------------------------------------------
 
 ; If we have finished all pending tasks above, try to asynchronously process
 ; sound data for each channel in a round-robin manner.
@@ -338,19 +333,8 @@ FinishSFX:
 ; processing the events and preparing to play a note, whenever we can.
 ; The result is much less lag and thus smoother rhythm.
 PreprocessTracks:
-	CMP	Port0, PrevMsg	; has SNES sent next message?
-	BNE	++		; branch if yes
-
-	BBC0	GlobalFlags, +
-
-	CLRC
-	ADC	Timer0Ticks, Timer0_out	; has the BGM timer ticked?
-	BNE	UpdateBGM		; branch if yes
-	ADC	Timer1Ticks, Timer1_out	; has the main timer ticked?
-	BNE	UpdateSFX		; branch if yes
-
-+	CALL	PreprocessTracks2
-++	JMP	GetMessage
+	CALL	PreprocessTracks2
+	JMP	GetMessage
 ; =============================================================================
 PreprocessTracks2:
 	CLR4	CurPreprocTrack
@@ -440,10 +424,13 @@ Preproc_Rest:
 	MOV	2, A
 	INC	Y
 ++	MOV	4, Y	; Preserve the track data offset.
-	MOV	A, NoteDur_L+X
+	MOVW	YA, 2
+	BNE	+
+	INCW	2	; Treat zero duration as one.
++	MOV	A, NoteDur_L+X
 	MOV	Y, NoteDur_H+X
 	ADDW	YA, 2	; Add the rest length to the current rest duration.
-	BCS	FinishPreproc	; Branch if the result does not fit into 16 bits.
+	BCS	+	; Branch if the result does not fit into 16 bits.
 	MOV	NoteDur_L+X, A	; Store the result.
 	MOV	NoteDur_H+X, Y
 	MOV	A, 4
@@ -451,7 +438,7 @@ Preproc_Rest:
 	ADDW	YA, 0	; Add the track offset the pointer.
 	MOV	TrkPtr_L+X, A	; store pointer LSB
 	MOV	TrkPtr_H+X, Y	; store pointer MSB
-	JMP	FinishPreproc
++	JMP	FinishPreproc
 ; =============================================================================
 SoftKeyRelease:
 	BBS5	TempFlags, +	; Skip if channel in use by SFX.
@@ -606,7 +593,11 @@ SetDuration:
 	ADDW	YA, 0
 	MOV	TrkPtr_L+X, A	; store pointer LSB
 	MOV	TrkPtr_H+X, Y	; store pointer MSB
-	MOV	A, TempFlags
+	MOV	A, NoteDur_L+X
+	OR	A, NoteDur_H+X
+	BNE	+
+	INC	NoteDur_L+X
++	MOV	A, TempFlags
 	MOV	SndFlags+X, A
 	JMP	FinishTrackUpdate
 ; =============================================================================
@@ -648,7 +639,7 @@ PrepareNote:
 	ROR	A
 	MOV	2, A	; store LSB of the result as LSB of pitch offset
 	MOV	A, PitchTable+1+X	; read LSB of seed pitch value
-	MOV	Y, A	
+	MOV	Y, A
 	MOV	A, PitchTable+X	; read MSB of seed pitch value
 	BBS7	4, +	; branch on negative fine-tune
 	ADDW	YA, 2	; add given pitch offset to seed pitch
@@ -665,17 +656,16 @@ SkipTuning:
 	MOV	A, PitchTable+X
 TuningDone:
 	MOVW	2, YA	; Now we have the pitch value.
+
 	MOV	X, CurrentTrack
 
 	; Copy initial pitch slide parameters.
-	MOV	A, PitchSlideDelay+X	; delay
-	MOV	t_PitchSlideDelay+X, A
-	MOV	A, PitchSlideInterval+X	; interval
-	MOV	t_PitchSlideTimer+X, A
-	MOV	A, PitchSlideSteps+X	; total up/down steps
+	MOV	A, PitchSlideDelay+X		; delay
+	BNE	+
+	MOV	A, PitchSlideInterval+X		; interval
++	MOV	t_PitchSlideTimer+X, A
+	MOV	A, PitchSlideSteps+X		; total up/down steps
 	MOV	t_PitchSlideSteps+X, A
-	MOV	A, PitchSlideStepsDown+X	; steps of going down
-	MOV	t_PitchSlideStepsDown+X, A
 
 	; Copy initial vibrato parameters.
 	MOV	A, VibDelta+X
@@ -683,13 +673,22 @@ TuningDone:
 	EOR	A, #-1
 	INC	A
 	MOV	VibDelta+X, A
-+	MOV	A, VibLen+X	; cycle length
-	LSR	A	; divide it by 2
++
+	MOV	A, VibLen+X			; cycle length
+	LSR	A				; halve it
 	MOV	t_VibSteps+X, A
-	MOV	A, VibInterval+X	; interval
+	MOV	A, VibInterval+X		; interval
+
+	; Now, I doubt DKC ever has any vibrato parameters
+	; where the sum of delay and step interval reaches 256. However, just
+	; in case, I will write here some code which works around it.
+	;BEQ	+				; branch if 256
+	CLRC
+	ADC	A, VibDelay+X			; delay
+	;BCC	+
+	;MOV	A, #0				; limit to 256
+;+	
 	MOV	t_VibTimer+X, A
-	MOV	A, VibDelay+X	; delay
-	MOV	t_VibDelay+X, A
 
 	; Copy initial tremolo parameters.
 	MOV	A, TremDelta+X
@@ -697,13 +696,19 @@ TuningDone:
 	EOR	A, #-1
 	INC	A
 	MOV	TremDelta+X, A
-+	MOV	A, TremLen+X
-	LSR	A
++
+	MOV	A, TremLen+X			; cycle length
+	LSR	A				; halve it
 	MOV	t_TremLen+X, A
-	MOV	A, TremInterval+X
+	MOV	A, TremInterval+X		; interval
+
+	;BEQ	+				; branch if 256
+	CLRC
+	ADC	A, TremDelay+X			; delay
+	;BCC	+
+	;MOV	A, #0				; limit to 256
+;+
 	MOV	t_TremTimer+X, A
-	MOV	A, TremDelay+X
-	MOV	t_TremDelay+X, A
 
 	; write current sound parameters into DSP
 	MOV	DSPAddr, CurVoiceAddr
@@ -759,12 +764,6 @@ UpdateTrack2:	; $91C
 	BMI	+
 	RET
 ; -----------------------------------------------------------------------------
-+	MOV	A, t_TremDelay+X
-	BEQ	+
-	DEC	A
-	MOV	t_TremDelay+X, A
-	JMP	FinishTremolo
-; -----------------------------------------------------------------------------
 +	DEC	t_TremTimer+X
 	BNE	FinishTremolo
 	MOV	A, TremInterval+X
@@ -773,10 +772,10 @@ UpdateTrack2:	; $91C
 	MOV	A, TremDelta+X
 	MOV	0, A
 	CLRC
-	ADC	DSPData, 0
+	ADC	DSPData, 0	; Add delta to left channel volume.
 	INC	DSPAddr
 	CLRC
-	ADC	DSPData, 0
+	ADC	DSPData, 0	; Add delta to right channel volume.
 
 	MOV	A, t_TremLen+X
 	DEC	A
@@ -784,7 +783,7 @@ UpdateTrack2:	; $91C
 	BNE	FinishTremolo
 	MOV	A, TremLen+X
 	MOV	t_TremLen+X, A
-	MOV	A, TremDelta+X
+	MOV	A, 0
 	EOR	A, #-1
 	INC	A
 	MOV	TremDelta+X, A
@@ -796,52 +795,32 @@ FinishTremolo:
 	MOV	Y, A
 	MOVW	0, YA	; Set the initial delta to 0.
 
-	MOV	A, t_PitchSlideDelay+X
-	BEQ	loc_9DA
-	CMP	A, #-1
-	BEQ	loc_A39		; Branch if pitch slide finished.
-	DEC	A
-	MOV	t_PitchSlideDelay+X, A
-	BNE	loc_A39
-	MOV	A, #1
-	MOV	t_PitchSlideTimer+X, A
-loc_9DA:
+	MOV	A, t_PitchSlideSteps+X
+	BEQ	SkipPitchSlide
 	DEC	t_PitchSlideTimer+X
-	BNE	loc_A39
+	BNE	SkipPitchSlide
 	MOV	A, PitchSlideInterval+X
 	MOV	t_PitchSlideTimer+X, A
 
 	;MOV	Y, #0
-	MOV	A, t_PitchSlideStepsDown+X
-	BEQ	+
-	DEC	A
-	MOV	t_PitchSlideStepsDown+X, A
-
+	MOV	A, PitchSlideSteps+X
+	SETC
+	SBC	A, t_PitchSlideSteps+X
+	CMP	A, PitchSlideStepsDown+X
 	MOV	A, PitchSlideDelta+X	; get pitch offset
+	BCS	+
+
 	EOR	A, #-1		; negate it
 	INC	A
-	JMP	++
-; -----------------------------------------------------------------------------
-+	MOV	A, PitchSlideDelta+X
-++	BPL	+		; sign-extend it
++	BPL	+		; sign-extend it
 	DEC	Y
 +	MOVW	0, YA	; Store the delta.
 
 	DEC	t_PitchSlideSteps+X
-	BNE	loc_A39
-	MOV	A, #-1
-	MOV	t_PitchSlideDelay+X, A
 
-loc_A39:
-	MOV	A, t_VibDelay+X
-	BEQ	loc_A48
-	DEC	A
-	MOV	t_VibDelay+X, A
-	JMP	loc_AB4
-; -----------------------------------------------------------------------------
-loc_A48:
+SkipPitchSlide:
 	DEC	t_VibTimer+X
-	BNE	loc_AB4
+	BNE	WritePitchDelta
 	MOV	A, VibInterval+X
 	MOV	t_VibTimer+X, A
 
@@ -851,26 +830,28 @@ loc_A48:
 	DEC	Y
 +	ADDW	YA, 0
 	MOVW	0, YA
-	
+
 	DEC	t_VibSteps+X
-	BNE	loc_AB4
+	BNE	WritePitchDelta
 	MOV	A, VibLen+X
 	MOV	t_VibSteps+X, A
 	MOV	A, VibDelta+X
 	EOR	A, #-1
 	INC	A
 	MOV	VibDelta+X, A
-loc_AB4:
+
+WritePitchDelta:
 	; Now add the delta to the current pitch value at the DSP.
 	; Limit the pitch to the valid range of $0000..$3FFF.
-	MOV	A, 1
-	CLRC
-	ADC	DSPData, 0
+	MOV	A, DSPData
 	INC	DSPAddr
-	ADC	A, DSPData
+	MOV	Y, DSPData
+	ADDW	YA, 0
 	BMI	.minus
-	CMP	A, #$40
-	BCS	+		; branch if pitch is out of range
+	CMP	Y, #$40
+	BCS	+	; branch if pitch is out of range
+	MOV	DSPData, Y
+	DEC	DSPAddr
 	MOV	DSPData, A
 	RET
 ; -----------------------------------------------------------------------------
@@ -880,7 +861,7 @@ loc_AB4:
 	MOV	DSPData, #$FF
 	RET
 ; -----------------------------------------------------------------------------
-	; Set the minimum possible pitch.
+	; Set the minimum possible pitch. It may result in a DC bias, though.
 .minus:
 	MOV	DSPData, #0
 	DEC	DSPAddr
@@ -889,6 +870,12 @@ loc_AB4:
 ; =============================================================================
 EndOfTrack:
 	MOV	X, CurrentTrack
+	DEC	Y
+	MOV	A, Y
+	MOV	Y, #0
+	ADDW	YA, 0
+	MOV	TrkPtr_L+X, A	; store pointer LSB
+	MOV	TrkPtr_H+X, Y	; store pointer MSB
 	BBS5	TempFlags, +
 	BBC7	TempFlags, +
 	MOV	A, CurVoiceAddr
@@ -1050,7 +1037,7 @@ PitchSlideDown:	; $C09
 PitchSlideOff:	; $C40
 	MOV	X, CurrentTrack
 	MOV	A, #0
-	MOV	PitchSlideDelta+X, A
+	MOV	PitchSlideSteps+X, A
 	JMP	FinishEvent
 ; =============================================================================
 SetTempo:	; $DEB
@@ -1178,6 +1165,7 @@ NoiseOff:	; $E2A
 	CLR3	TempFlags
 	JMP	FinishEvent
 ; =============================================================================
+; Same as PitchSlideUp2 but the delta is negated.
 PitchSlideDown2:	; $EA7
 	MOV	X, CurrentTrack
 	MOV	A, (0)+Y	; delay
@@ -1197,6 +1185,7 @@ PitchSlideDown2:	; $EA7
 	MOV	PitchSlideDelta+X, A
 	JMP	IncAndFinishEvent
 ; =============================================================================
+; Set a back-and-forth pitch slide.
 PitchSlideUp2:	; $EDC
 	MOV	X, CurrentTrack
 	MOV	A, (0)+Y	; delay
@@ -1405,20 +1394,17 @@ SetUpEngine:	; $1076
 	MOV	ControlReg, A
 	MOVW	GlobalFlags, YA		; Also clears CurPreprocTrack.
 
-	INC	A	; A = 1
-	MOV	Y, A	; Y = 1
-	MOVW	SFXDivCounter, YA	; Also sets MiscDivCounter
-	MOVW	Timer0Ticks, YA		; Also sets Timer1Ticks.
+	MOV	SFXDivCounter, #7
+	MOV	MiscDivCounter, #4
 
-	MOV	X, #7
-	MOV	Y, #15
-	JMP	+	; Loop optimisation. Saves 3 cycles.
-; -----------------------------------------------------------------------------
+	MOV	X, #8
+	MOV	Y, #16
+
 -	DEC	X
 	DEC	Y
 
 	MOV	A, #1
-+	MOV	NoteDur_L+X, A	; set delay duration to 1
+	MOV	NoteDur_L+X, A	; set delay duration to 1
 	MOV	SndFlags+X, A
 	DEC	A	; A = 0
 	MOV	NoteDur_H+X, A
@@ -1427,7 +1413,7 @@ SetUpEngine:	; $1076
 	MOV	SndFlags+8+X, A
 	MOV	Transpose+X, A
 	MOV	SndFineTune+X, A
-	MOV	PitchSlideDelta+X, A
+	MOV	PitchSlideSteps+X, A
 	MOV	VibDelta+X, A
 	MOV	TremDelta+X, A
 	MOV	A, MusicData-1+Y
@@ -1488,7 +1474,7 @@ PlaySFX:	; $1178
 	MOV	NoteDur_H+8+X, A
 	MOV	Transpose+8+X, A
 	MOV	SndFineTune+8+X, A
-	MOV	PitchSlideDelta+8+X, A
+	MOV	PitchSlideSteps+8+X, A
 	MOV	VibDelta+8+X, A
 	MOV	TremDelta+8+X, A
 	INC	A	; A = 1
