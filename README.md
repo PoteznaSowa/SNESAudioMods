@@ -11,10 +11,12 @@ Added features:
 - faster data transfers from SNES;
 - faster processing of messages from SNES;
 - lower latency of sound effects.
+
 Bug fixes:
 - voice pitch value will no longer get out of bounds, especially when processing pitch bends;
 - if a song does not initialise ADSR parameters, default ones will be used;
 - fixed BGM voice echo on/off events interfering with an SFX playing at the same channel.
+
 Removed unused features:
 - downmixing stereo to mono, as the game does not even have an option to toggle the stereo/mono mode;
 - fading out all sounds, including echo;
