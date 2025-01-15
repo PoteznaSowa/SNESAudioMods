@@ -3,6 +3,7 @@ Here is a collection of modded, improved, or fully rewritten sound engines used 
 
 ## Donkey Kong Country SPC engine (RareSPC_alt.asm)
 Based on the disassembly of the original design, the audio engine used in Rare’s Donkey Kong Country was almost fully rewritten to add new features, fix bugs, remove dead code, and increase overall performance.
+
 Added features:
 - score data processing in the background when being idle;
 - smooth BGM timer ticks by running an SPC700’s timer at a variable period;
