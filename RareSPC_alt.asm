@@ -74,11 +74,11 @@ Port0:		skip 1	; $F4	; I/O ports. Port 0 stores the message number.
 Port1:		skip 1	; $F5	; 1st argument of message.
 Port2:		skip 1	; $F6	; 2nd argument of message.
 Port3:		skip 1	; $F7	; Unused in Donkey Kong Country 2 and 3.
-IOUnused0:	skip 1	; $F8	; Normal RAM.
-IOUnused1:	skip 1	; $F9	; Normal RAM.
+UnusedIO0:	skip 1	; $F8	; Normal RAM.
+UnusedIO1:	skip 1	; $F9	; Normal RAM.
 Timer0:		skip 1	; $FA	; Write here BGM timer interval in units of .125 ms.
 Timer1:		skip 1	; $FB
-Timer2:		skip 1	; $FC
+Timer2:		skip 1	; $FC	; 1/64 ms (64000 Hz) timer. Unused.
 Timer0_out:	skip 1	; $FD	; Number of timer 0 ticks.
 Timer1_out:	skip 1	; $FE	; Number of timer 1 ticks.
 Timer2_out:	skip 1	; $FF	; Number of timer 2 ticks.
@@ -129,15 +129,15 @@ DSP_Pitch =	2
 DSP_PitchL =	2
 DSP_PitchH =	3
 
-DSP_Voice =	4
+DSP_SRCN =	4
 
 DSP_ADSR =	5
 DSP_ADSR1 =	5
 DSP_ADSR2 =	6
-DSP_Gain =	7
+DSP_GAIN =	7
 
-DSP_EnvLevel =	8
-DSP_OutX =	9
+DSP_ENVX =	8
+DSP_OUTX =	9
 
 DSP_MasterL =	$0C
 DSP_MasterR =	$1C
@@ -156,7 +156,7 @@ DSP_EchoLoc =	$6D
 DSP_EchoDelay =	$7D
 DSP_FIR =	$0F
 
-; External data locations.
+; Locations of external data.
 SoundEntryPnt =		$5E8
 MusicData =		$12A0
 SFXData	=		$2380
@@ -187,7 +187,7 @@ TransferMode:
 	JMP	-			; retry
 ; -----------------------------------------------------------------------------
 +	MOV	Port0, Y		; reply to SNES
-	MOV	PrevMsg, Y		;
+	MOV	PrevMsg, Y		; store message ID
 	JMP	ProgramStart		; run the program
 ; -----------------------------------------------------------------------------
 	REP 12 : DB 0	; must be at least 8
@@ -245,16 +245,16 @@ GotoTransferMode:	; $71F
 	BPL	-
 
 	; Fade out echo feedback.
-	MOV	DSPAddr, #$D
+-	MOV	DSPAddr, #$D
+	MUL	YA	; 9 tick delay.
 	MOV	A, DSPData
 	BPL	+
--	INC	DSPData
-	BNE	-
-	JMP	++
+	INC	DSPData
+	BRA	-
 ; -----------------------------------------------------------------------------
-+	BEQ	++
--	DBNZ	DSPData, -
-++
++	BEQ	+
+	DBNZ	DSPData, -
++
 
 	; Wait until all channels fade out.
 	MOV	DSPAddr, #8
@@ -318,7 +318,7 @@ UpdateTracks2:
 	CLR3	CurrentTrack	; revert to BGM
 	INC	CurrentTrack
 	AND	DSPAddr, #$70
-	
+
 +	CALL	UpdateTrack2	; update pitch bend
 	ADC	DSPAddr, #$10	; Go to next channel.
 	BPL	UpdateTracks2	; ...if any.
@@ -361,6 +361,7 @@ PreprocessTracks2:
 	MOV	A, VoiceBitMask+Y	; Get the bitmask for the channel.
 	MOV	CurVoiceBit, A
 
+	; Mark the channel as silent if the ADSR envelope falls to zero.
 	MOV	A, DSPData	; Read the current ADSR envelope level.
 	CMP	A, SndEnvLvl+X	; Compare with the level measured earlier.
 	MOV	SndEnvLvl+X, A	; Store it.
@@ -369,7 +370,6 @@ PreprocessTracks2:
 	BNE	+	; Branch if not.
 	CLR7	TempFlags	; Clear the ‘channel audible’ flag.
 
-	; Mark the channel as silent if the ADSR envelope falls to zero.
 +	MOV	CurrentTrack, X
 	MOV	A, TrkPtr_L+X	; load the track pointer
 	MOV	Y, TrkPtr_H+X
@@ -391,19 +391,18 @@ PreprocessTracks2:
 	MOV	A, 2
 	ASL	A
 	MOV	X, A
-	JMP	(TrackEventTable+X)	; run the sound event
+	JMP	(TrackEventIndex+X)	; run the sound event
 ; -----------------------------------------------------------------------------
 Preproc_RestOrNote:
 	BBS6	TempFlags, FinishPreproc	; Branch if ready for key-on.
 	BBS7	TempFlags, FinishPreproc	; Branch if audible.
 
 	CMP	A, #$80
-	BEQ	Preproc_Rest
+	BEQ	Preproc_Rest	; Branch if rest.
 
 	BBS5	TempFlags, FinishPreproc	; Branch if the channel in use by SFX.
 
 	CALL	PrepareNote	; Prepare a note for key-on.
-
 	SET6	TempFlags	; Set the ‘ready for key-on’ flag.
 FinishPreproc:
 	MOV	A, TempFlags	; Save track flags.
@@ -499,16 +498,14 @@ NextTrack:
 	MOV	Y, NoteDur_L+X
 	CMP	Y, #3
 	BCS	ContinueNote
-	MOV	A, NoteDur_H+X
-	CMP	A, #1		; C = (A >= 1)
 	DEC	Y
 	BPL	+
-	BCC	FetchNextEvent
 	DEC	NoteDur_H+X
 	JMP	ContinueNote
 ; -----------------------------------------------------------------------------
-+	BCS	ContinueNote
-	BEQ	FetchNextEvent
++	MOV	A, NoteDur_H+X
+	BNE	ContinueNote
+	DBNZ	Y, FetchNextEvent
 	CALL	SoftKeyRelease
 ContinueNote:
 	DEC	NoteDur_L+X
@@ -519,10 +516,15 @@ FinishTrackUpdate:
 	; Now write the key-on mask to the DSP.
 	MOV	Y, KeyOnShadow
 	BEQ	+	; Do not bother if nothing to key-on.
+
 	MOV	DSPAddr, #$5C
 	MOV	DSPData, #0
 	MOV	A, #$4C
 	MOVW	DSPAddr, YA
+
+	; Wait a little bit to work around a buggy SPC dumper in Snes9x.
+	NOP
+
 +	RET
 ; -----------------------------------------------------------------------------
 FetchNextEvent:
@@ -538,7 +540,7 @@ FetchNextEvent2:
 	INC	Y	; Go to the next byte.
 	ASL	A
 	MOV	X, A
-	JMP	(TrackEventTable+X)	; Run an event handler.
+	JMP	(TrackEventIndex+X)	; Run an event handler.
 ; =============================================================================
 SetMasterVolume:	; dummied out
 	INC	Y
@@ -601,7 +603,7 @@ SetDuration:
 	MOV	A, NoteDur_L+X
 	OR	A, NoteDur_H+X
 	BNE	+
-	INC	NoteDur_L+X
+	INC	NoteDur_L+X	; Treat zero duration as one.
 +	MOV	A, TempFlags
 	MOV	SndFlags+X, A
 	JMP	FinishTrackUpdate
@@ -610,7 +612,7 @@ PrepareNote:
 	MOV	DSPAddr, #$5C
 	MOV	DSPData, CurVoiceBit	; Key-off the channel.
 
-	; calculate pitch
+	; Calculate pitch value for the DSP.
 	; Note: maximum range is 5 octaves
 	CLRC
 	ADC	A, Transpose+X
@@ -643,14 +645,14 @@ PrepareNote:
 	LSR	3
 	ROR	A
 	MOV	2, A	; store LSB of the result as LSB of pitch offset
-	MOV	A, PitchTable+1+X	; read LSB of seed pitch value
+	MOV	A, PitchTable+1+X	; read LSB of base pitch value
 	MOV	Y, A
-	MOV	A, PitchTable+X	; read MSB of seed pitch value
+	MOV	A, PitchTable+X	; read MSB of base pitch value
 	BBS7	4, +	; branch on negative fine-tune
-	ADDW	YA, 2	; add given pitch offset to seed pitch
+	ADDW	YA, 2	; add given pitch offset to base pitch
 	JMP	TuningDone
 ; -----------------------------------------------------------------------------
-+	SUBW	YA, 2	; subtract given pitch offset from seed pitch
++	SUBW	YA, 2	; subtract given pitch offset from base pitch
 	JMP	TuningDone
 ; -----------------------------------------------------------------------------
 SkipTuning:
@@ -661,8 +663,12 @@ SkipTuning:
 	MOV	A, PitchTable+X
 TuningDone:
 	MOVW	2, YA	; Now we have the pitch value.
+	CMP	Y, #$40
+	BCC	+
+	LSR	3	; Halve it if out of range.
+	ROR	2
 
-	MOV	X, CurrentTrack
++	MOV	X, CurrentTrack
 
 	; Copy initial pitch slide parameters.
 	MOV	A, PitchSlideDelay+X		; delay
@@ -724,11 +730,9 @@ TuningDone:
 	MOV	A, SndVol_R+X
 	MOV	DSPData, A	; right channel volume
 	INC	DSPAddr
-	MOV	A, 2
-	MOV	DSPData, A	; LSB of pitch value
+	MOV	DSPData, 2	; LSB of pitch value
 	INC	DSPAddr
-	MOV	A, 3
-	MOV	DSPData, A	; MSB of pitch value
+	MOV	DSPData, 3	; MSB of pitch value
 	INC	DSPAddr
 	MOV	Y, SndTimbre+X
 	MOV	A, TimbreLUT+Y
@@ -853,7 +857,7 @@ WritePitchDelta:
 	INC	DSPAddr
 	MOV	Y, DSPData
 	ADDW	YA, 0
-	BMI	.minus
+	BMI	++
 	CMP	Y, #$40
 	BCS	+	; branch if pitch is out of range
 	MOV	DSPData, Y
@@ -868,8 +872,7 @@ WritePitchDelta:
 	RET
 ; -----------------------------------------------------------------------------
 	; Set the minimum possible pitch. It may result in a DC bias, though.
-.minus:
-	MOV	DSPData, #0
+++	MOV	DSPData, #0
 	DEC	DSPAddr
 	MOV	DSPData, #0
 	RET
@@ -906,7 +909,7 @@ EndOfTrack:
 ; -----------------------------------------------------------------------------
 +	RET
 ; =============================================================================
-SetVoice:	; $ABA
+SetInstrument:	; $ABA
 	MOV	X, CurrentTrack
 	MOV	A, (0)+Y
 	MOV	SndTimbre+X, A	; Store the logical instrument index.
@@ -1106,7 +1109,7 @@ SetADSR:	; $CDF
 	MOV	SndADSR2+X, A	; ADSR 2
 	JMP	IncAndFinishEvent
 ; =============================================================================
-SetTuning:	; $D32
+SetFineTune:	; $D32
 	MOV	X, CurrentTrack
 	MOV	A, (0)+Y
 	MOV	SndFineTune+X, A
@@ -1160,7 +1163,7 @@ SetFIR:		; $DD8
 
 	JMP	FinishEvent
 ; =============================================================================
-SetNoise:	; $DF8
+SetNoiseFreq:	; $DF8
 	MOV	A, (0)+Y
 	MOV	DSPAddr, #DSP_Flags
 	MOV	DSPData, A
@@ -1258,10 +1261,10 @@ TremoloOff:	; $FF8
 VoiceBitMask:	; $1004
 	DB	1, 2, 4, 8, $10, $20, $40, $80
 ; =============================================================================
-TrackEventTable:	; $1014
+TrackEventIndex:	; $1014
 	; See https://loveemu.hatenablog.com/entry/20130819/SNES_Rare_Music_Spec for details
 	DW	EndOfTrack	; $A6E	; individual effect
-	DW	SetVoice	; $ABA	; individual effect (no rest required)
+	DW	SetInstrument	; $ABA	; individual effect (no rest required)
 	DW	SetVolume	; $AE3	; individual effect (no rest required)
 	DW	JumpTrack	; $B14	; individual effect (no rest required)
 	DW	CallSub		; $B29	; individual effect (no rest required)
@@ -1278,14 +1281,14 @@ TrackEventTable:	; $1014
 	DW	Vibrato		; $CB1	; individual effect
 	DW	SetADSR		; $CDF	; individual effect (no rest required)
 	DW	SetMasterVolume	; $CF9	; individual effect (no rest required)
-	DW	SetTuning	; $D32	; individual effect (no rest required)
+	DW	SetFineTune	; $D32	; individual effect (no rest required)
 	DW	SetTranspose	; $D45	; individual effect (no rest required)
 	DW	AddTranspose	; $D59	; individual effect (no rest required)
 	DW	SetEchoParams	; $D71	; global effect
 	DW	EchoOn		; $DA0	; individual effect (no rest required)
 	DW	EchoOff		; $DBB	; individual effect (no rest required)
-	DW	SetFIR		; $DD8	; global effect
-	DW	SetNoise	; $DF8	; global effect
+	DW	SetFIR		; $DD8	; global effect (but async)
+	DW	SetNoiseFreq	; $DF8	; global effect
 	DW	NoiseOn		; $E12	; individual effect (no rest required)
 	DW	NoiseOff	; $E2A	; individual effect (no rest required)
 	DW	0	; global effect
@@ -1335,7 +1338,7 @@ EventTypeTable:
 	DB	0	; global effect
 	DB	-1	; individual effect (no rest required)
 	DB	-1	; individual effect (no rest required)
-	DB	0	; global effect
+	DB	-1	; global effect (but async)
 	DB	0	; global effect
 	DB	-1	; individual effect (no rest required)
 	DB	-1	; individual effect (no rest required)
@@ -1367,10 +1370,8 @@ SetUpEngine:	; $1076
 
 	MOV	A, #$D		; echo feedback
 	MOVW	DSPAddr, YA	; = 0
-	MOV	A, #$4D		; echo enable
-	MOVW	DSPAddr, YA	; = 0
 
-	SET5	DSPAddr		; echo buffer location
+	MOV	DSPAddr, #$6D	; echo buffer location
 	MOV	DSPData, #EchoBuffer>>8
 
 	SET4	DSPAddr		; echo delay
@@ -1378,9 +1379,9 @@ SetUpEngine:	; $1076
 
 	MOV	Y, #64
 	MOV	A, #$C		; master left volume
-	MOVW	DSPAddr, YA
-	MOV	A, #$1C
-	MOVW	DSPAddr, YA
+	MOVW	DSPAddr, YA	; = 64
+	MOV	A, #$1C		; master right volume
+	MOVW	DSPAddr, YA	; = 64
 
 	MOV	A, #$5D		; source directory (instrument table)
 	MOV	Y, #SourceDir>>8
@@ -1394,8 +1395,8 @@ SetUpEngine:	; $1076
 	MOVW	DSPAddr, YA	; = 0
 	MOV	A, #$3C		; echo right volume
 	MOVW	DSPAddr, YA	; = 0
-	MOV	A, #$6C
-	MOVW	DSPAddr, YA
+	MOV	A, #$6C		; DSP flags
+	MOVW	DSPAddr, YA	; Unmute, enable echo writes
 
 	MOV	A, Y	; A = 0
 	MOV	ControlReg, A
@@ -1410,7 +1411,7 @@ SetUpEngine:	; $1076
 	DEC	Y
 
 	MOV	A, #1
-	MOV	NoteDur_L+X, A	; set delay duration to 1
+	MOV	NoteDur_L+X, A	; Set delay duration to 1.
 	MOV	SndEnvLvl+X, A
 	DEC	A	; A = 0
 	MOV	NoteDur_H+X, A
@@ -1435,7 +1436,12 @@ SetUpEngine:	; $1076
 	ASL	A
 	ASL	A
 	MOV	SndStackPtr+X, A
-	; set ADSR to $FE-$C1
+
+	; Set default ADSR parameters:
+	; Attack = 14
+	; Decay Rate = 7
+	; Sustain Level = 6
+	; Sustain Rate = 1
 	MOV	A, #$FE
 	MOV	SndADSR1+X, A
 	MOV	A, #$C1
@@ -1448,6 +1454,9 @@ SetUpEngine:	; $1076
 	RET
 ; =============================================================================
 PlaySFX:	; $1178
+	; inputs:
+	; A: ID of SFX
+	; X: the channel number the SFX is to be played at
 	ASL	A
 	MOV	Y, A
 
@@ -1475,7 +1484,7 @@ PlaySFX:	; $1178
 	ASL	A
 	ASL	A
 	ASL	A
-	MOV	SndStackPtr+8+X, A	; store stack pointer
+	MOV	SndStackPtr+8+X, A	; Set stack pointer.
 	MOV	A, #0
 	MOV	DfltNoteDur_L+8+X, A
 	MOV	DfltNoteDur_H+8+X, A
@@ -1489,25 +1498,33 @@ PlaySFX:	; $1178
 	MOV	NoteDur_L+8+X, A
 	MOV	SndEnvLvl+8+X, A
 
-	; set center volume to -128
+	; Set center volume to -128.
 	MOV	A, #-128
 	MOV	SndVol_L+8+X, A
 	MOV	SndVol_R+8+X, A
 
-	; set ADSR to $FE-$C1
+	; Set default ADSR parameters:
+	; Attack = 14
+	; Decay Rate = 7
+	; Sustain Level = 6
+	; Sustain Rate = 1
 	MOV	A, #$FE
 	MOV	SndADSR1+8+X, A
 	MOV	A, #$C1
 	MOV	SndADSR2+8+X, A
 
-	; set track pointer
+	; Set track pointer.
 	MOV	A, SFXData+Y
 	MOV	TrkPtr_L+8+X, A
 	MOV	A, SFXData+1+Y
 	MOV	TrkPtr_H+8+X, A
 	RET
-;-----------------------------------------------------------------------------
+; =============================================================================
 PitchTable:	; $11E6
+	; This section contains raw pitch values for S-DSP.
+	; Real SNES hardware tends to have a slightly, although not usually
+	; audibly, higher audio sample rate than the nominal one of 32000 Hz.
+	; Hence, the values here should be rounded down.
 	DW	483
 	DW	512,	542,	574,	608,	645,	683
 	DW	724,	767,	812,	861,	912,	966
@@ -1520,7 +1537,8 @@ PitchTable:	; $11E6
 	DW	8192,	8679,	9195,	9741,	10321,	10935
 	DW	11585,	12274,	13003,	13777,	14596,	15464
 
-	; Harp notes in the ‘Life in the Mines’ song go out of range, so the
-	; last octave is duplicated.
-	DW	8192,	8679,	9195,	9741,	10321,	10935
+	; Harp notes in the ‘Life in the Mines’ song go out of range.
+	DW	16384,	17358,	18390,	9741,	10321,	10935
 	DW	11585,	12274,	13003,	13777,	14596,	15464
+	DW	16384,	17358,	18390
+
