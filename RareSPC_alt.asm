@@ -47,7 +47,7 @@ MiscDivCounter:		skip 1
 ; 2: echo on
 ; 3: noise on
 ; 5: overridden by SFX
-; 6: already ready for key-on
+; 6: ready for key-on
 ; 7: track audible (no rest)
 SndFlags:	skip 16
 
@@ -83,8 +83,11 @@ Timer0_out:	skip 1	; $FD	; Number of timer 0 ticks.
 Timer1_out:	skip 1	; $FE	; Number of timer 1 ticks.
 Timer2_out:	skip 1	; $FF	; Number of timer 2 ticks.
 
-; Direct page 1 variables
-			skip 16
+
+PrgStack:	skip 7
+PrgStackBase:	skip 1
+		skip 8
+
 Transpose:	skip 16	; signed pitch offset in semitones
 
 ; S-DSP sound parameters
@@ -96,24 +99,25 @@ SndADSR2:	skip 16	; ADSR 2 value
 DfltNoteDur_L:	skip 16	; Current default duration.
 DfltNoteDur_H:	skip 16
 
+t_TremSteps:	skip 16	; ticks before next tremolo step
+
 PitchSlideDelay:	skip 16	; stored pitch slide delay
 PitchSlideInterval:	skip 16	; stored pitch slide interval (time between steps)
+PitchSlideDelta:	skip 16	; pitch slide pitch delta (linear, signed)
 PitchSlideSteps:	skip 16	; stored total pitch slide steps
 PitchSlideStepsDown:	skip 16	; stored pitch slide steps in opposite direction
-PitchSlideDelta:	skip 16	; pitch slide pitch delta (linear, signed)
 
 VibDelay:	skip 16	; stored vibrato delay
-VibLen:		skip 16	; steps per vibrato cycle
 VibInterval:	skip 16	; stored vibrato interval (time between steps) 
 VibDelta:	skip 16	; vibrato pitch delta (linear, signed)
+VibLen:		skip 16	; steps per vibrato cycle
+
+TremDelay:	skip 16	; stored tremolo delay
+TremInterval:	skip 16	; stored tremolo interval (time between steps)
+TremDelta:	skip 16	; volume delta per step
+TremLen:	skip 16	; steps per tremolo cycle
 
 SndEnvLvl:	skip 16	; current ADSR envelope level
-
-TremInterval:		skip 16	; $2C4
-TremDelta:		skip 16	; $2D4
-t_TremLen:		skip 16	; $2E4
-TremLen:		skip 16	; $2F4
-TremDelay:		skip 16	; $304
 
 ; Subroutine stack. The maximum nest level is 8.
 Stack_PtrL:		skip 128	; $334
@@ -121,39 +125,34 @@ Stack_PtrH:		skip 128	; $3B4
 Stack_RepCnt:		skip 128	; $434
 
 ; DSP register addresses
-DSP_Vol =	0
-DSP_VolL =	0
-DSP_VolR =	1
-
-DSP_Pitch =	2
-DSP_PitchL =	2
-DSP_PitchH =	3
-
+DSP_VOL =	0
+DSP_VOLL =	0
+DSP_VOLR =	1
+DSP_PITCH =	2
+DSP_PITCHL =	2
+DSP_PITCHH =	3
 DSP_SRCN =	4
-
 DSP_ADSR =	5
 DSP_ADSR1 =	5
 DSP_ADSR2 =	6
 DSP_GAIN =	7
-
-DSP_ENVX =	8
-DSP_OUTX =	9
-
-DSP_MasterL =	$0C
-DSP_MasterR =	$1C
-DSP_EchoL =	$2C
-DSP_EchoR =	$3C
-DSP_KeyOn =	$4C
-DSP_KeyOff =	$5C
-DSP_Flags =	$6C
-DSP_EndX =	$7C
-DSP_Feedback =	$0D
-DSP_PitchMod =	$2D
-DSP_NoiseOn =	$3D
-DSP_EchoOn =	$4D
-DSP_VoiceDir =	$5D
-DSP_EchoLoc =	$6D
-DSP_EchoDelay =	$7D
+DSP_ENV =	8
+DSP_OUT =	9
+DSP_MVOLL =	$0C
+DSP_MVOLR =	$1C
+DSP_EVOLL =	$2C
+DSP_EVOLR =	$3C
+DSP_KON =	$4C
+DSP_KOFF =	$5C
+DSP_FLG =	$6C
+DSP_ENDX =	$7C
+DSP_EFB =	$0D
+DSP_PMON =	$2D
+DSP_NON =	$3D
+DSP_EON =	$4D
+DSP_DIR =	$5D
+DSP_ESA =	$6D
+DSP_EDL =	$7D
 DSP_FIR =	$0F
 
 ; Locations of external data.
@@ -199,14 +198,13 @@ TimbreLUT:
 ; =============================================================================
 ProgramStart:
 	MOV	Port1, #$FF	; indicate for SNES that engine is ready
-	MOV	X, #$F
-	MOV	SP, X	; SP = $010F
+	MOV	X, #PrgStackBase&$FF
+	MOV	SP, X
 	CALL	SetUpEngine
 
 GetMessage:	; $606
 	CMP	Port0, PrevMsg	; has SNES sent next message?
 	BEQ	MainLoop	; branch if no
-GetMessage2:
 	MOV	A, Port1	; read message
 	MOV	X, Port2
 	MOV	Y, Port0	; read messsage ID again
@@ -222,7 +220,7 @@ GetMessage2:
 	;CMP	A, #$FC
 	;BEQ	SetMonoFlag
 
-	; play SFX
+	; Play SFX.
 	CALL	PlaySFX
 	JMP	GetMessage
 ; -----------------------------------------------------------------------------
@@ -245,15 +243,13 @@ GotoTransferMode:	; $71F
 	BPL	-
 
 	; Fade out echo feedback.
--	MOV	DSPAddr, #$D
-	MUL	YA	; 9 tick delay.
+	MOV	DSPAddr, #$D
 	MOV	A, DSPData
 	BPL	+
-	INC	DSPData
-	BRA	-
-; -----------------------------------------------------------------------------
+-	INC	DSPData
+	BNE	-
 +	BEQ	+
-	DBNZ	DSPData, -
+-	DBNZ	DSPData, -
 +
 
 	; Wait until all channels fade out.
@@ -285,12 +281,14 @@ MainLoop:	; $649
 	MOV	A, Timer0_out	; has the BGM timer ticked?
 	BEQ	SkipBGMUpdate	; branch if no
 	BBC1	GlobalFlags, +	; Branch if tempo not halved.
-	BBS2	GlobalFlags, ++	; Skip updates every second tick.
-+	MOV	CurrentTrack, #0
+	BBS2	GlobalFlags, SkipBGMUpdate2	; Skip updates every second tick.
++	SET2	GlobalFlags
+	MOV	CurrentTrack, #0
 	CALL	UpdateTracks
-++	EOR	GlobalFlags, #4	; Toggle the ‘skip tick’ flag.
 	JMP	GetMessage
 ; -----------------------------------------------------------------------------
+SkipBGMUpdate2:
+	CLR2	GlobalFlags
 SkipBGMUpdate:
 	MOV	A, Timer1_out		; has the main timer ticked?
 	BEQ	PreprocessTracks	; branch if no
@@ -347,7 +345,8 @@ PreprocessTracks2:
 
 	MOV	A, SndFlags+X	; Load track flags.
 	MOV	TempFlags, A
-	BBC0	TempFlags, SkipPreproc	; branch if not active
+	BBC0	TempFlags, SkipPreproc	; Branch if not active.
+	BBS6	TempFlags, SkipPreproc	; Branch if ready for key-on.
 
 	; Prepare the DSP address and voice bitmask variables.
 	; Also, access the ENVX register.
@@ -394,7 +393,6 @@ PreprocessTracks2:
 	JMP	(TrackEventIndex+X)	; run the sound event
 ; -----------------------------------------------------------------------------
 Preproc_RestOrNote:
-	BBS6	TempFlags, FinishPreproc	; Branch if ready for key-on.
 	BBS7	TempFlags, FinishPreproc	; Branch if audible.
 
 	CMP	A, #$80
@@ -470,6 +468,7 @@ TempoToInterval:
 	MOV	Y, #$64	; YA = 25600
 	DIV	YA, X
 	BVC	+	; branch if quotient < 256
+	BEQ	+	; branch if quotient = 256
 	SETC
 	ROR	A	; A = (A >> 1) | $80
 	SET1	GlobalFlags	; Set the ‘halve BGM tempo’ flag.
@@ -710,7 +709,7 @@ TuningDone:
 +
 	MOV	A, TremLen+X			; cycle length
 	LSR	A				; halve it
-	MOV	t_TremLen+X, A
+	MOV	t_TremSteps+X, A
 	MOV	A, TremInterval+X		; interval
 
 	;BEQ	+				; branch if 256
@@ -786,12 +785,12 @@ UpdateTrack2:	; $91C
 	CLRC
 	ADC	DSPData, 0	; Add delta to right channel volume.
 
-	MOV	A, t_TremLen+X
-	DEC	A
-	MOV	t_TremLen+X, A
+	SETP
+	DEC	t_TremSteps-$100+X
+	CLRP
 	BNE	DoPitchSlide
 	MOV	A, TremLen+X
-	MOV	t_TremLen+X, A
+	MOV	t_TremSteps+X, A
 	MOV	A, 0
 	EOR	A, #-1
 	INC	A
@@ -1129,17 +1128,17 @@ AddTranspose:	; $D59
 	JMP	IncAndFinishEvent
 ; =============================================================================
 SetEchoParams:	; $D71
-	MOV	DSPAddr, #DSP_Feedback
+	MOV	DSPAddr, #DSP_EFB
 	MOV	A, (0)+Y
 	MOV	DSPData, A
 	INC	Y
 
-	MOV	DSPAddr, #DSP_EchoL
+	MOV	DSPAddr, #DSP_EVOLL
 	MOV	A, (0)+Y
 	MOV	DSPData, A
 	INC	Y
 
-	SET4	DSPAddr
+	SET4	DSPAddr	; DSP_EVOLR
 	MOV	A, (0)+Y
 	MOV	DSPData, A
 	JMP	IncAndFinishEvent
@@ -1165,7 +1164,7 @@ SetFIR:		; $DD8
 ; =============================================================================
 SetNoiseFreq:	; $DF8
 	MOV	A, (0)+Y
-	MOV	DSPAddr, #DSP_Flags
+	MOV	DSPAddr, #DSP_FLG
 	MOV	DSPData, A
 	JMP	IncAndFinishEvent
 ; =============================================================================

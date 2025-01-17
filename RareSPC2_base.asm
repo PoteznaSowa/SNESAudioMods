@@ -12,6 +12,7 @@
 ;   at some occasions
 
 
+; Page 0 variables
 	ORG	0
 _S0:	skip 1	; scratch RAM for intermediate data
 _S1:	skip 1
@@ -54,7 +55,7 @@ EchoOnShadow:	skip 1
 ; 2: echo on
 ; 3: noise on
 ; 5: overridden by SFX
-; 6: already ready for key-on
+; 6: ready for key-on
 ; 7: track audible (no rest)
 SndFlags:	skip 16
 
@@ -91,7 +92,6 @@ Timer0_out:	skip 1	; $FD	; Number of timer 0 ticks.
 Timer1_out:	skip 1	; $FE	; Number of timer 1 ticks.
 Timer2_out:	skip 1	; $FF	; Number of timer 2 ticks.
 
-; Direct page 1 variables
 
 ; I had to move the one-sample echo buffer somewhere else but $FF00..$FF03.
 ; Part of the Nuts and Bolts song sample set is written into this region and
@@ -115,14 +115,14 @@ DfltNoteDur_H:	skip 16
 
 PitchSlideDelay:	skip 16	; stored pitch slide delay
 PitchSlideInterval:	skip 16	; stored pitch slide interval (time between steps)
+PitchSlideDelta:	skip 16	; pitch slide pitch delta (linear, signed)
 PitchSlideSteps:	skip 16	; stored total pitch slide steps
 PitchSlideStepsDown:	skip 16	; pitch slide steps in opposite direction
-PitchSlideDelta:	skip 16	; pitch slide pitch delta (linear, signed)
 
 VibDelay:	skip 16	; stored vibrato delay
-VibLen:		skip 16	; steps per vibrato cycle
 VibInterval:	skip 16	; stored vibrato interval (time between steps) 
 VibDelta:	skip 16	; vibrato pitch delta (linear, signed)
+VibLen:		skip 16	; steps per vibrato cycle
 
 SndEnvLvl:	skip 16	; current ADSR envelope level
 
@@ -134,41 +134,35 @@ Stack_RepCnt:	skip 128	; stack repeat count
 SndFIRShadow:	skip 8	; contains echo FIR filter coefficients
 
 ; DSP register addresses
-DSP_Vol =	0
-DSP_VolL =	0
-DSP_VolR =	1
-
-DSP_Pitch =	2
-DSP_PitchL =	2
-DSP_PitchH =	3
-
+DSP_VOL =	0
+DSP_VOLL =	0
+DSP_VOLR =	1
+DSP_PITCH =	2
+DSP_PITCHL =	2
+DSP_PITCHH =	3
 DSP_SRCN =	4
-
 DSP_ADSR =	5
 DSP_ADSR1 =	5
 DSP_ADSR2 =	6
 DSP_GAIN =	7
-
-DSP_ENVX =	8
-DSP_OUTX =	9
-
-DSP_MasterL =	$0C
-DSP_MasterR =	$1C
-DSP_EchoL =	$2C
-DSP_EchoR =	$3C
-DSP_KeyOn =	$4C
-DSP_KeyOff =	$5C
-DSP_Flags =	$6C
-DSP_EndX =	$7C
-DSP_Feedback =	$0D
-DSP_PitchMod =	$2D
-DSP_NoiseOn =	$3D
-DSP_EchoOn =	$4D
-DSP_VoiceDir =	$5D
-DSP_EchoLoc =	$6D
-DSP_EchoDelay =	$7D
+DSP_ENV =	8
+DSP_OUT =	9
+DSP_MVOLL =	$0C
+DSP_MVOLR =	$1C
+DSP_EVOLL =	$2C
+DSP_EVOLR =	$3C
+DSP_KON =	$4C
+DSP_KOFF =	$5C
+DSP_FLG =	$6C
+DSP_ENDX =	$7C
+DSP_EFB =	$0D
+DSP_PMON =	$2D
+DSP_NON =	$3D
+DSP_EON =	$4D
+DSP_DIR =	$5D
+DSP_ESA =	$6D
+DSP_EDL =	$7D
 DSP_FIR =	$0F
-
 
 ; Locations of external data.
 
@@ -176,12 +170,12 @@ MusicData =		$1300
 MusicIndex =		$1312
 
 ; Sound data for SFXs $00..$5F
-SFX_IndexBound0 =	$2410
-SFX_PtrTable0 =		$2412
+SFXIndexBound0 =	$2410
+SFXPtrTable0 =		$2412
 
 ; Sound data for SFXs $60..$7F
-SFX_IndexBound1 =	$2E94
-SFX_PtrTable1 =		$2E96
+SFXIndexBound1 =	$2E94
+SFXPtrTable1 =		$2E96
 
 SourceDir =		$3100
 EchoBufEnd =		$FEFE
@@ -268,7 +262,7 @@ TransferMode:
 ; $2442 $0002 $1234 $5678
 ; $3204 $0002 $9ABC $DEF0
 ; Then, when all data is sent, SNES returns APU into sound engine
-; and sends a command to begin music:
+; and sends a message to begin music:
 ; $7206 $0000 $00FE $00FA
 ; Each time a word of data is sent, SNES increments word counter at Port 0.
 ; See GetMessage for more information
@@ -319,10 +313,10 @@ GetMessage:
 	CALL	PlaySFX
 	JMP	GetMessage
 ; =============================================================================
-+	AND	A, #7		; clear unwanted bits
++	AND	A, #7		; Clear unwanted bits.
 	ASL	A
 	MOV	X, A
-	JMP	(Command_Index+X)	; process the command
+	JMP	(MessageIndex+X)	; Process the message.
 ; =============================================================================
 
 ; Events are strictly prioritised in the following order:
@@ -342,17 +336,18 @@ MainLoop:
 +	MOV	A, Timer0_out	; has the BGM timer ticked?
 	BEQ	SkipBGMUpdate	; branch if no
 	BBC1	GlobalFlags, +	; Branch if tempo not halved.
-	BBS2	GlobalFlags, ++	; Skip updates every second tick.
-+	MOV	CurrentTrack, #0
+	BBS2	GlobalFlags, SkipBGMUpdate2	; Skip updates every second tick.
++	SET2	GlobalFlags
+	MOV	CurrentTrack, #0
 	CALL	UpdateTracks
-++	EOR	GlobalFlags, #4
-	JMP	GetMessage
+++	JMP	GetMessage
 ; -----------------------------------------------------------------------------
+SkipBGMUpdate2:
+	CLR2	GlobalFlags
 SkipBGMUpdate:
 	MOV	A, Timer1_out		; has the main timer ticked?
 	BEQ	PreprocessTracks	; branch if no
 
-UpdateSFX:
 	MOV	CurrentTrack, #8
 	CALL	UpdateTracks
 
@@ -400,7 +395,8 @@ PreprocessTracks2:
 
 	MOV	A, SndFlags+X	; Load track flags.
 	MOV	TempFlags, A
-	BBC0	TempFlags, SkipPreproc	; branch if not active
+	BBC0	TempFlags, SkipPreproc	; Branch if not active.
+	BBS6	TempFlags, SkipPreproc	; Branch if ready for key-on.
 
 	; Prepare the DSP address and voice bitmask variables.
 	; Also, access the ENVX register.
@@ -447,7 +443,6 @@ PreprocessTracks2:
 	JMP	(TrackEventIndex+X)	; run the sound event
 ; -----------------------------------------------------------------------------
 Preproc_RestOrNote:
-	BBS6	TempFlags, FinishPreproc	; Branch if ready for key-on.
 	BBS7	TempFlags, FinishPreproc	; Branch if audible.
 
 	CMP	A, #$80
@@ -492,7 +487,7 @@ Preproc_Rest:
 	MOV	NoteDur_H+X, Y
 	MOV	A, 4
 	MOV	Y, #0
-	ADDW	YA, 0	; Add the track offset the pointer.
+	ADDW	YA, 0	; Add the track offset to the pointer.
 	MOV	TrkPtr_L+X, A	; store pointer LSB
 	MOV	TrkPtr_H+X, Y	; store pointer MSB
 +	JMP	FinishPreproc
@@ -510,8 +505,8 @@ SetMonoFlag:
 	AND	A, #$BF
 	MOV	SndFlags-1+Y, A
 	DBNZ	Y, -
-CommandF8:	; formerly used to set a BGM mailslot or something?
-CommandF9:	; formerly used to set a BGM mailslot or something?
+MessageF8:	; formerly used to set a BGM mailslot or something?
+MessageF9:	; formerly used to set a BGM mailslot or something?
 	JMP	GetMessage
 ; =============================================================================
 ; Change pitch modifier for SFX at channel #5.
@@ -519,7 +514,7 @@ CommandF9:	; formerly used to set a BGM mailslot or something?
 ; and DKC3 (various vehicles from Funky's Rentals).
 ; Offset=Argument*8
 AdjustSFXPitch:
-	BBC7	SndFlags+8+5, .skip	; Do not bother if the SFX inaudible.
+	BBC7	SndFlags+8+5, ++	; Do not bother if the SFX inaudible.
 
 	; Sign-extend and multiply by 8.
 			; Y: s6543210
@@ -542,8 +537,7 @@ AdjustSFXPitch:
 
 	MOV	DSPAddr, #$52
 	CALL	WritePitchDelta		; Apply changes.
-.skip:
-	JMP	GetMessage
+++	JMP	GetMessage
 ; =============================================================================
 ; Change the volume of SFX at channel #5.
 ; Volume = Volume * Modifier / 100
@@ -584,16 +578,14 @@ GotoTransferMode:
 
 	; Fade out FIR filter taps.
 	MOV	DSPAddr, #$F
--	DIV	YA, X	; 12-tick delay.
-	MOV	A, DSPData
+--	MOV	A, DSPData
 	BPL	+
-	INC	DSPData
-	BRA	-
-; -----------------------------------------------------------------------------
+-	INC	DSPData
+	BNE	-
 +	BEQ	+
-	DBNZ	DSPData, -
+-	DBNZ	DSPData, -
 +	ADC	DSPAddr, #$10
-	BPL	-
+	BPL	--
 
 	MOV	A, #$7D
 	MOV	Y, #0
@@ -619,8 +611,8 @@ GotoTransferMode:
 
 	JMP	TransferMode	; Enter transfer mode.
 ; =============================================================================
-Command_Index:
-	DW	CommandF8, CommandF9		; $F8, $F9
+MessageIndex:
+	DW	MessageF8, MessageF9		; $F8, $F9
 	DW	SetMonoFlag, PlayIndexedBGM	; $FA, $FB
 	DW	AdjustSFXPitch, AdjustSFXVol	; $FC, $FD
 	DW	StartEngine, GotoTransferMode	; $FE, $FF
@@ -641,19 +633,20 @@ SoftKeyRelease:
 TempoToInterval2:
 	MOV	A, BGMTempo
 
-; Convert BGM tempo to a timer period.
+; Convert BGM tempo at register A to a timer period.
 ; Period=25600/Tempo
 TempoToInterval:
-	CLR1	GlobalFlags	; Clear the "halve BGM tempo" flag.
+	CLR1	GlobalFlags	; Clear the ‘halve BGM tempo’ flag.
 	MOV	2, Y	; Preserve Y.
-	MOV	X, BGMTempo
+	MOV	X, A
 	MOV	A, #0
 	MOV	Y, #$64	; YA = 25600
 	DIV	YA, X
 	BVC	+	; branch if quotient < 256
+	BEQ	+	; branch if quotient = 256
 	SETC
 	ROR	A	; A = (A >> 1) | $80
-	SET1	GlobalFlags	; Clear the "halve BGM tempo" flag.
+	SET1	GlobalFlags	; Set the ‘halve BGM tempo’ flag.
 +	MOV	Timer0, A
 	MOV	Y, 2
 	RET
@@ -1664,14 +1657,14 @@ PlaySFX:	; $10F7
 	CMP	A, #$60
 	BPL	loc_1104	; branch if ID >= $60
 
-	CMP	A, SFX_IndexBound0
+	CMP	A, SFXIndexBound0
 	BPL	loc_110D	; out of range if ID >= bound
 	JMP	loc_1111
 ; -----------------------------------------------------------------------------
 loc_1104:
 	SETC
 	SBC	A, #$60
-	CMP	A, SFX_IndexBound1
+	CMP	A, SFXIndexBound1
 	BMI	loc_1111	; out of range if ID >= bound
 
 loc_110D:
@@ -1746,15 +1739,15 @@ loc_1111:
 	MOV	Y, A
 	CMP	Y, #$C0	; $60
 	BCS	+
-	MOV	A, SFX_PtrTable0+Y
+	MOV	A, SFXPtrTable0+Y
 	MOV	TrkPtr_L+8+X, A
-	MOV	A, SFX_PtrTable0+1+Y
+	MOV	A, SFXPtrTable0+1+Y
 	MOV	TrkPtr_H+8+X, A
 	RET
 ; -----------------------------------------------------------------------------
-+	MOV	A, SFX_PtrTable1-$C0+Y
++	MOV	A, SFXPtrTable1-$C0+Y
 	MOV	TrkPtr_L+8+X, A
-	MOV	A, SFX_PtrTable1+1-$C0+Y
+	MOV	A, SFXPtrTable1+1-$C0+Y
 	MOV	TrkPtr_H+8+X, A
 	RET
 ; =============================================================================
