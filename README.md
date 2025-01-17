@@ -16,7 +16,7 @@ Added features:
 Bug fixes:
 - voice pitch value will no longer get out of bounds, especially when processing pitch bends;
 - if a song does not initialise ADSR parameters, default ones will be used;
-- fixed BGM voice echo on/off events interfering with an SFX playing at the same channel.
+- fixed BGM voice echo on/off events interfering with an SFX playing on the same channel.
 
 Removed unused features:
 - downmixing stereo to mono, as the game does not even have an option to toggle the stereo/mono mode;
@@ -26,3 +26,28 @@ Removed unused features:
 
 ## Donkey Kong Country 2/3 SPC engine (RareSPC2_base.asm, RareSPC_dkq.asm, RareSPC_dkdt.asm)
 Like a previous one, this engine also underwent a high number of improvements in its code.
+
+Added features:
+- score data processing in the background when being idle;
+- smooth BGM timer ticks by running an SPC700’s timer at a variable period;
+- echo FIR filter fadeout on entering the transfer mode (to load score data and samples);
+- softer key/note releases by using S-DSP’s GAIN per-voice registers instead of KOF;
+- faster data transfers from SNES;
+- faster processing of messages from SNES;
+- lower latency of sound effects;
+- echo buffer initialisation using S-DSP itself.
+
+Bug fixes:
+- voice pitch value will no longer get out of bounds, especially when processing pitch bends;
+- if a song does not initialise ADSR parameters, default ones will be used;
+- fixed BGM voice echo on/off events interfering with an SFX playing at the same channel;
+- fixed a noticeable stall when SNES sends a message to play a subsong;
+- the echo buffer is properly initialised to avoid audible glitches;
+- removed a minor race condition which would make a pitch modifier for SFX at channel #5 inconsistent from time to time;
+- voice L/R volume is properly scaled even by very high values of BGM volume;
+- fixed a crash due to messages from SNES to play SFX at an invalid channel in Castle Crush;
+- fixed the echo buffer overwriting a $FF00..$FF03 memory region used by the Nuts and Bolts sample set.
+
+Removed unused features (possible leftovers from Rareware games before DKC2):
+- processing messages $F8 and $F9 which have totally no effect;
+- tremolo processing, as there is no way to enable it.
