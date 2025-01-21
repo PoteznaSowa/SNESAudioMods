@@ -24,6 +24,9 @@ Removed unused features:
 - audio score/sequence conditional jump;
 - voice volume and ADSR presets.
 
+TODO:
+- reduce the latency of SFXs even further.
+
 ## Donkey Kong Country 2/3 SPC engine (RareSPC2_base.asm, RareSPC_dkq.asm, RareSPC_dkdt.asm)
 Like a previous one, this engine also underwent a high number of improvements in its code.
 
@@ -42,9 +45,9 @@ Bug fixes:
 - if a song does not initialise ADSR parameters, default ones will be used;
 - fixed BGM voice echo on/off events interfering with an SFX playing at the same channel;
 - fixed a noticeable stall when SNES sends a message to play a subsong;
-- the echo buffer is properly initialised to avoid audible glitches;
+- the echo buffer is set up correctly to avoid audible glitches;
 - removed a minor race condition which would make a pitch modifier for SFX at channel #5 inconsistent from time to time;
-- voice L/R volume is properly scaled even by very high values of BGM volume;
+- voice L/R volume is correctly scaled even by very high values of BGM volume;
 - fixed a crash due to messages from SNES to play SFX at an invalid channel in Castle Crush;
 - fixed the echo buffer overwriting a $FF00..$FF03 memory region used by the Nuts and Bolts sample set.
 
