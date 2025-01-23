@@ -2,7 +2,7 @@
 Here is a collection of modded, improved, or fully rewritten sound engines used in their corresponding SNES games.
 
 ## Donkey Kong Country SPC engine (RareSPC_alt.asm)
-Based on the disassembly of the original design, the audio engine used in Rare’s Donkey Kong Country was almost fully rewritten to add new features, fix bugs, remove dead code, and increase overall performance.
+Based on the disassembly of the original design, the audio engine used in Rare’s Donkey Kong Country was almost completely rewritten to add new features, fix bugs, remove dead code, and increase overall performance.
 
 Added features:
 - score data processing in the background when being idle;
@@ -28,7 +28,7 @@ TODO:
 - reduce the latency of SFXs even further.
 
 ## Donkey Kong Country 2/3 SPC engine (RareSPC2_base.asm, RareSPC_dkq.asm, RareSPC_dkdt.asm)
-Like a previous one, this engine also underwent a high number of improvements in its code.
+Like a previous one, this engine also underwent many improvements in its code.
 
 Added features:
 - score data processing in the background when being idle;
