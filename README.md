@@ -25,7 +25,7 @@ Removed unused features:
 - voice volume and ADSR presets.
 
 TODO:
-- reduce the latency of SFXs even further.
+- reduce SFX latency even further.
 
 ## Donkey Kong Country 2/3 SPC engine (RareSPC2_base.asm, RareSPC_dkq.asm, RareSPC_dkdt.asm)
 Like a previous one, this engine also underwent many improvements in its code.
