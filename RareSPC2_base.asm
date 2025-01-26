@@ -1666,11 +1666,10 @@ PlaySFX:
 	XCN	A
 	OR	A, #7
 	MOV	DSPAddr, A
-	;MOV	DSPData, #$9F	; Linear fade-out, rate 15
 	MOV	DSPData, #$BF	; Exponential fade-out, rate 15
 	CMP	SFXCount, #1
 	BNE	+
-	MOV	DSPData, #$9F	; Linear fade-out, rate 15
+	CLR5	DSPData		; Linear fade-out, rate 15
 +	CLR1	DSPAddr
 	CLR7	DSPData
 	MOV	A, #1
