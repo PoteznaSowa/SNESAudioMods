@@ -1,4 +1,4 @@
-; Modified Rare's Donkey Kong Country 2 and 3 sound engine.
+ï»¿; Modified Rare's Donkey Kong Country 2 and 3 sound engine.
 ; Based on Donkey Kong Country 2 and 3 sound engine disassembly.
 ; Author: PoteznaSowa.
 
@@ -635,7 +635,7 @@ TempoToInterval2:
 ; Convert BGM tempo at register A to a timer period.
 ; Period=25600/Tempo
 TempoToInterval:
-	CLR1	GlobalFlags	; Clear the ‘halve BGM tempo’ flag.
+	CLR1	GlobalFlags	; Clear the â€˜halve BGM tempoâ€™ flag.
 	MOV	2, Y	; Preserve Y.
 	MOV	X, A
 	MOV	A, #0
@@ -645,7 +645,7 @@ TempoToInterval:
 	BEQ	+	; branch if quotient = 256
 	SETC
 	ROR	A	; A = (A >> 1) | $80
-	SET1	GlobalFlags	; Set the ‘halve BGM tempo’ flag.
+	SET1	GlobalFlags	; Set the â€˜halve BGM tempoâ€™ flag.
 +	MOV	Timer0, A
 	MOV	Y, 2
 	RET
