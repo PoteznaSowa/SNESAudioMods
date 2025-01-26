@@ -1,4 +1,4 @@
-; Modified Rare’s Donkey Kong Country sound engine.
+ï»¿; Modified Rareâ€™s Donkey Kong Country sound engine.
 ; Based on Donkey Kong Country sound engine disassembly.
 ; Author: PoteznaSowa.
 
@@ -13,19 +13,14 @@ hirom
 
 ; Page 0 variables
 	ORG	0
-_S0:	skip 1	; scratch RAM for intermediate data
-_S1:	skip 1
-_S2:	skip 1
-_S3:	skip 1
-_S4:	skip 1
-_S5:	skip 1
+		skip 6	; scratch RAM for intermediate data
 TempFlags:	skip 1
 CurrentTrack:	skip 1
 CurVoiceBit:	skip 1
 CurVoiceAddr:	skip 1
 KeyOnShadow:	skip 1	; key-on bitmask
 
-PrevMsg:		skip 1
+PrevMsg:	skip 1
 
 ; 0: engine is running
 ; 1: halve BGM tempo
@@ -243,14 +238,19 @@ GotoTransferMode:	; $71F
 	BPL	-
 
 	; Fade out echo feedback.
-	MOV	DSPAddr, #$D
+-	MOV	DSPAddr, #$D
+	XCN	A
+	XCN	A
+	CLRC
 	MOV	A, DSPData
-	BPL	+
--	INC	DSPData
+	BMI	+
+	BEQ	++
+	DEC	DSPData
+	BRA	-
+; -----------------------------------------------------------------------------
++	INC	DSPData
 	BNE	-
-+	BEQ	+
--	DBNZ	DSPData, -
-+
+++
 
 	; Wait until all channels fade out.
 	MOV	DSPAddr, #8
@@ -349,7 +349,7 @@ PreprocessTracks2:
 	BBS6	TempFlags, SkipPreproc	; Branch if ready for key-on.
 
 	; Prepare the DSP address and voice bitmask variables.
-	; Also, access the ENVX register.
+	; Also, read the ENVX register to check if the channel is audible.
 	MOV	A, X
 	AND	A, #7	; Limit to 0..7.
 	MOV	Y, A
@@ -364,10 +364,10 @@ PreprocessTracks2:
 	MOV	A, DSPData	; Read the current ADSR envelope level.
 	CMP	A, SndEnvLvl+X	; Compare with the level measured earlier.
 	MOV	SndEnvLvl+X, A	; Store it.
-	BCS	+	; Branch if the envelope does not ramp down.
-	MOV	Y, A	; Did it reach zero though?
+	BCS	+	; Branch if the envelope is not ramping down.
+	MOV	Y, A	; Has it fallen to zero though?
 	BNE	+	; Branch if not.
-	CLR7	TempFlags	; Clear the ‘channel audible’ flag.
+	CLR7	TempFlags	; Clear the â€˜channel audibleâ€™ flag.
 
 +	MOV	CurrentTrack, X
 	MOV	A, TrkPtr_L+X	; load the track pointer
@@ -375,7 +375,7 @@ PreprocessTracks2:
 	MOVW	0, YA
 	MOV	Y, #0
 	MOV	A, (0)+Y		; read a track byte
-	BMI	Preproc_RestOrNote	; branch if this is a note or rest
+	BMI	Preproc_RestOrNote	; branch if this is a note or a rest
 	;CMP	A, #$33
 	;BCS	FinishPreproc	; branch on invalid data
 	MOV	2, A		; Preserve the event type.
@@ -385,7 +385,7 @@ PreprocessTracks2:
 	BEQ	FinishPreproc	; branch if it must always be run synchronously
 	BBS7	TempFlags, FinishPreproc	; Branch if the track is audible.
 
-+	SET3	GlobalFlags	; Set the ‘async sound events’ flag.
++	SET3	GlobalFlags	; Set the â€˜async sound eventsâ€™ flag.
 	MOV	Y, #1	; Go to the next track byte.
 	MOV	A, 2
 	ASL	A
@@ -401,7 +401,7 @@ Preproc_RestOrNote:
 	BBS5	TempFlags, FinishPreproc	; Branch if the channel in use by SFX.
 
 	CALL	PrepareNote	; Prepare a note for key-on.
-	SET6	TempFlags	; Set the ‘ready for key-on’ flag.
+	SET6	TempFlags	; Set the â€˜ready for key-onâ€™ flag.
 FinishPreproc:
 	MOV	A, TempFlags	; Save track flags.
 	MOV	SndFlags+X, A
@@ -461,7 +461,7 @@ TempoToInterval2:
 ; Convert BGM tempo at register A to a timer period.
 ; Period=25600/Tempo
 TempoToInterval:
-	CLR1	GlobalFlags	; Clear the ‘halve BGM tempo’ flag.
+	CLR1	GlobalFlags	; Clear the â€˜halve BGM tempoâ€™ flag.
 	MOV	2, Y	; Preserve Y.
 	MOV	X, A
 	MOV	A, #0
@@ -471,7 +471,7 @@ TempoToInterval:
 	BEQ	+	; branch if quotient = 256
 	SETC
 	ROR	A	; A = (A >> 1) | $80
-	SET1	GlobalFlags	; Set the ‘halve BGM tempo’ flag.
+	SET1	GlobalFlags	; Set the â€˜halve BGM tempoâ€™ flag.
 +	MOV	Timer0, A
 	MOV	Y, 2
 	RET
@@ -573,7 +573,7 @@ GotNote:
 TriggerNote:
 	OR	KeyOnShadow, CurVoiceBit
 	CLR6	TempFlags
-	SET7	TempFlags	; Set the ‘track audible’ flag.
+	SET7	TempFlags	; Set the â€˜track audibleâ€™ flag.
 	MOV	A, #0
 	MOV	SndEnvLvl+X, A
 
@@ -1025,6 +1025,7 @@ PitchSlideUp:	; $BD5
 	MOV	PitchSlideStepsDown+X, A
 	JMP	IncAndFinishEvent
 ; =============================================================================
+; Same as PitchSlideUp but the delta is negated.
 PitchSlideDown:	; $C09
 	MOV	X, CurrentTrack
 	MOV	A, (0)+Y	; delay
@@ -1536,7 +1537,7 @@ PitchTable:	; $11E6
 	DW	8192,	8679,	9195,	9741,	10321,	10935
 	DW	11585,	12274,	13003,	13777,	14596,	15464
 
-	; Harp notes in the ‘Life in the Mines’ song go out of range.
+	; Harp notes in the â€˜Life in the Minesâ€™ song go out of range.
 	DW	16384,	17358,	18390,	9741,	10321,	10935
 	DW	11585,	12274,	13003,	13777,	14596,	15464
 	DW	16384,	17358,	18390
