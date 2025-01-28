@@ -16,13 +16,14 @@
 	ORG	0
 		skip 6	; scratch RAM for intermediate data
 TempFlags:	skip 1
-CurrentTrack:	skip 1
-CurVoiceBit:	skip 1
-CurVoiceAddr:	skip 1
+CurrentTrack:	skip 1	; Track number
+CurVoiceBit:	skip 1	; S-DSP voice bit
+CurVoiceAddr:	skip 1	; S-DSP voice address
 KeyOnShadow:	skip 1	; key-on bitmask
 
 NextMsg:	skip 1	; Next message number
 
+; Bit field
 ; 0: engine is running
 ; 1: halve BGM tempo
 ; 2: if bit 1 is set, skip BGM updates
@@ -35,15 +36,16 @@ GlobalFlags:	skip 1
 CurPreprocTrack:	skip 1	; number of channel to be preprocessed
 BGMTempo:	skip 1
 SndPitchOffset:	skip 2	; Current pitch offset for SFX channel #5
-SFXCount:	skip 1
+SFXDelay:	skip 1	; Initial SFX length
 BGMVol:		skip 1	; current BGM volume
-VolPreset1_L:	skip 1
+VolPreset1_L:	skip 1	; Global voice volume presets
 VolPreset1_R:	skip 1
 VolPreset2_L:	skip 1
 VolPreset2_R:	skip 1
 
 	ORG	$20
 
+; Array of bit fields
 ; 0: active
 ; 1: long duration on
 ; 2: echo on
@@ -369,8 +371,8 @@ UpdateTracks2:
 	ADC	DSPAddr, #$10	; Go to next channel pitch
 	BPL	UpdateTracks2
 
-	DBNZ	SFXCount, GetMessage	; Decrement the initial SFX pre-silence length.
-	INC	SFXCount		; Limit it to 1, though.
+	DBNZ	SFXDelay, GetMessage	; Decrement the initial SFX pre-silence length.
+	INC	SFXDelay		; Limit it to 1, though.
 	JMP	GetMessage
 ; -----------------------------------------------------------------------------
 
@@ -652,9 +654,10 @@ TempoToInterval:
 ; =============================================================================
 UpdateTracks:
 	; Initialise variables for channel #0.
-	MOV	CurVoiceBit, #1
-	MOV	CurVoiceAddr, #0
-	MOV	KeyOnShadow, #0
+	MOV	A, #1
+	MOV	Y, #0
+	MOVW	CurVoiceBit, YA	; Also initialises CurVoiceAddr
+	MOV	KeyOnShadow, Y
 	CLR3	GlobalFlags
 	JMP	+	; Loop optimisation. Saves 6 cycles.
 ; -----------------------------------------------------------------------------
@@ -1591,7 +1594,7 @@ SetUpEngine:
 	MOV	Y, A
 	MOVW	Timer0, YA		; Set timers 0 and 1 to 32 ms.
 	MOVW	GlobalFlags, YA		; Also clears CurPreprocTrack.
-	MOV	SFXCount, #1
+	MOV	SFXDelay, #1
 
 	MOV	Y, #16
 	MOV	A, (0)+Y
@@ -1667,7 +1670,7 @@ PlaySFX:
 	OR	A, #7
 	MOV	DSPAddr, A
 	MOV	DSPData, #$BF	; Exponential fade-out, rate 15
-	CMP	SFXCount, #1
+	CMP	SFXDelay, #1
 	BNE	+
 	CLR5	DSPData		; Linear fade-out, rate 15
 +	CLR1	DSPAddr
@@ -1717,8 +1720,8 @@ PlaySFX:
 	MOV	SndADSR2+8+X, A
 
 	; Arpeggiate composite SFXs.
-	MOV	A, SFXCount
-	INC	SFXCount
+	MOV	A, SFXDelay
+	INC	SFXDelay
 	MOV	NoteDur_L+8+X, A
 
 	; Set track pointer.

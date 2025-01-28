@@ -15,9 +15,9 @@ hirom
 	ORG	0
 		skip 6	; scratch RAM for intermediate data
 TempFlags:	skip 1
-CurrentTrack:	skip 1
-CurVoiceBit:	skip 1
-CurVoiceAddr:	skip 1
+CurrentTrack:	skip 1	; Track number
+CurVoiceBit:	skip 1	; S-DSP voice bit
+CurVoiceAddr:	skip 1	; S-DSP voice address
 KeyOnShadow:	skip 1	; key-on bitmask
 
 PrevMsg:	skip 1
@@ -30,13 +30,13 @@ PrevMsg:	skip 1
 GlobalFlags:	skip 1
 
 CurPreprocTrack:	skip 1	; number of channel to be preprocessed
-
 BGMTempo:	skip 1
 SFXDivCounter:		skip 1
 MiscDivCounter:		skip 1
 
 	ORG	$20
 
+; Array of bit fields
 ; 0: active
 ; 1: long duration on
 ; 2: echo on
@@ -478,9 +478,10 @@ TempoToInterval:
 ; =============================================================================
 UpdateTracks:
 	; Initialise variables for channel #0.
-	MOV	CurVoiceBit, #1
-	MOV	CurVoiceAddr, #0
-	MOV	KeyOnShadow, #0
+	MOV	A, #1
+	MOV	Y, #0
+	MOVW	CurVoiceBit, YA	; Also initialises CurVoiceAddr
+	MOV	KeyOnShadow, Y
 	CLR3	GlobalFlags
 	JMP	+	; Loop optimisation. Saves 6 cycles.
 ; -----------------------------------------------------------------------------
