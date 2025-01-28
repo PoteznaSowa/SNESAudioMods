@@ -1,4 +1,4 @@
-﻿; Modified Rare's Donkey Kong Country 2 and 3 sound engine.
+; Modified Rare's Donkey Kong Country 2 and 3 sound engine.
 ; Based on Donkey Kong Country 2 and 3 sound engine disassembly.
 ; Author: PoteznaSowa.
 
