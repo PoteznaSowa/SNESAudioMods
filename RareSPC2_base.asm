@@ -579,14 +579,14 @@ GotoTransferMode:
 
 	; Fade out FIR filter taps.
 	MOV	DSPAddr, #$F
---	MOV	A, DSPData
+-	MOV	A, DSPData
 	BPL	+
--	INC	DSPData
+	INC	DSPData
 	BNE	-
 +	BEQ	+
--	DBNZ	DSPData, -
+	DBNZ	DSPData, -
 +	ADC	DSPAddr, #$10
-	BPL	--
+	BPL	-
 
 	MOV	A, #$7D
 	MOV	Y, #0
@@ -699,7 +699,7 @@ FinishTrackUpdate:
 	MOVW	DSPAddr, YA
 
 	; Wait a little bit to work around a buggy SPC dumper in Snes9x.
-	NOP
+	MUL	YA
 
 +	RET
 ; -----------------------------------------------------------------------------
@@ -896,7 +896,7 @@ TuningDone:
 	BBC4	GlobalFlags, ++	; Branch if stereo.
 
 	; Downmix stereo to mono.
-	; Vol=(abs(Vol_L)+abs(Vol_R)+1)/(-2)
+	; Vol = ⌊(abs(Vol_L)+abs(Vol_R)+1)/2⌋
 	BPL	+	; Vol=abs(Vol)
 	EOR	A, #-1
 	INC	A
@@ -908,8 +908,8 @@ TuningDone:
 +	SETC
 	ADC	A, 4
 	ROR	A	; Halve the result.
-	EOR	A, #-1
-	INC	A
+	;EOR	A, #-1
+	;INC	A
 	CALL	ApplyVolMod
 	MOV	DSPData, A	; Left channel level
 	JMP	+++
@@ -1704,8 +1704,8 @@ PlaySFX:
 	MOV	VibDelta+8+X, A
 	MOV	PitchSlideSteps+8+X, A
 
-	; Set center volume to -128.
-	MOV	A, #-128
+	; Set volume to 127 at centre.
+	MOV	A, #127
 	MOV	SndVol_L+8+X, A
 	MOV	SndVol_R+8+X, A
 

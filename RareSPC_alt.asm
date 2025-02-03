@@ -22,6 +22,7 @@ KeyOnShadow:	skip 1	; key-on bitmask
 
 PrevMsg:	skip 1
 
+; Bit field
 ; 0: engine is running
 ; 1: halve BGM tempo
 ; 2: if bit 1 is set, skip BGM updates
@@ -239,18 +240,13 @@ GotoTransferMode:	; $71F
 
 	; Fade out echo feedback.
 -	MOV	DSPAddr, #$D
-	XCN	A
-	XCN	A
-	CLRC
 	MOV	A, DSPData
-	BMI	+
-	BEQ	++
-	DEC	DSPData
-	BRA	-
-; -----------------------------------------------------------------------------
-+	INC	DSPData
+	BPL	+
+	INC	DSPData
 	BNE	-
-++
++	BEQ	+
+	DBNZ	DSPData, -
++
 
 	; Wait until all channels fade out.
 	MOV	DSPAddr, #8
@@ -523,7 +519,7 @@ FinishTrackUpdate:
 	MOVW	DSPAddr, YA
 
 	; Wait a little bit to work around a buggy SPC dumper in Snes9x.
-	NOP
+	MUL	YA
 
 +	RET
 ; -----------------------------------------------------------------------------
@@ -1499,8 +1495,8 @@ PlaySFX:	; $1178
 	MOV	NoteDur_L+8+X, A
 	MOV	SndEnvLvl+8+X, A
 
-	; Set center volume to -128.
-	MOV	A, #-128
+	; Set volume to 127 at centre.
+	MOV	A, #127
 	MOV	SndVol_L+8+X, A
 	MOV	SndVol_R+8+X, A
 
