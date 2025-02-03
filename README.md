@@ -24,6 +24,10 @@ Removed unused features:
 - audio score/sequence conditional jump;
 - voice volume and ADSR presets.
 
+Known issues:
+- occasional audio clipping/distortion due to too high voice L/R levels;
+- some samples missing in sample sets (not a bug in the engine).
+
 TODO:
 - reduce SFX latency even further;
 - refactor code comments.
@@ -55,6 +59,9 @@ Bug fixes:
 Removed unused features (possible leftovers from Rareware games before DKC2):
 - processing messages $F8 and $F9 which have totally no effect;
 - tremolo processing, as there is no way to enable it.
+
+Known issues:
+- occasional audio clipping/distortion due to too high voice L/R levels.
 
 TODO:
 - refactor code comments.
