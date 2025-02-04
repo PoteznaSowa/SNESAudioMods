@@ -545,13 +545,15 @@ AdjustSFXPitch:
 AdjustSFXVol:
 	MOV	0, Y
 	MOV	DSPAddr, #$50
+	MOV	X, #100
 	MOV	A, DSPData
-	CALL	ApplyVolMod2
+	CALL	MulDiv2
 	MOV	DSPData, A
 	INC	DSPAddr
 	MOV	Y, 0
+	MOV	X, #100
 	MOV	A, DSPData
-	CALL	ApplyVolMod2
+	CALL	MulDiv2
 	MOV	DSPData, A
 	JMP	GetMessage
 ; =============================================================================
@@ -618,6 +620,8 @@ MessageIndex:
 	DW	AdjustSFXPitch, AdjustSFXVol	; $FC, $FD
 	DW	StartEngine, GotoTransferMode	; $FE, $FF
 ; =============================================================================
+; Set the current channel to fade out.
+; It takes up to 676 samples to fade to silence.
 SoftKeyRelease:
 	BBS5	TempFlags, +	; Skip if channel in use by SFX.
 	BBS6	TempFlags, +	; Skip if a note is ready for key-on.
@@ -910,14 +914,14 @@ TuningDone:
 	ROR	A	; Halve the result.
 	;EOR	A, #-1
 	;INC	A
-	CALL	ApplyVolMod
+	CALL	MulDiv
 	MOV	DSPData, A	; Left channel level
 	JMP	+++
 ; -----------------------------------------------------------------------------
-++	CALL	ApplyVolMod
+++	CALL	MulDiv
 	MOV	DSPData, A	; Left channel level
 	MOV	A, SndVol_R+X
-	CALL	ApplyVolMod
+	CALL	MulDiv
 +++	INC	DSPAddr
 	MOV	DSPData, A	; Right channel level
 	INC	DSPAddr
@@ -1132,23 +1136,24 @@ SetBGMVol:
 
 +	JMP	IncAndFinishEvent
 ; =============================================================================
-ApplyVolMod:
+MulDiv:
 	; Calculate sound volume using the following formula:
-	; Volume*Modifier/100
+	; Volume*Modifier/132
 	; Then, clip the result to [-128;127].
-	CMP	X, #8
-	BCS	ApplyVolMod2_ret	; don't change volume for SFXs
 	MOV	Y, BGMVol
-ApplyVolMod2:
-	MOV	X, #100
+	CMP	X, #8
+	BCC	+		; don't change volume for SFXs
+	MOV	Y, #100
++	MOV	X, #132		; Vol ≈ Vol * 3 / 4
 	OR	A, #0
+MulDiv2:
 	BMI	.minus
 	MUL	YA
 	DIV	YA, X
 	BMI	+	; branch if A >= 128
 	BVS	+	; Unlikely, but branch on overflow.
 	MOV	X, CurrentTrack
-.ret:	RET
+	RET
 ; -----------------------------------------------------------------------------
 +	MOV	A, #127
 	MOV	X, CurrentTrack
@@ -1464,11 +1469,15 @@ SetEchoParams:
 
 	MOV	DSPAddr, #$2C	; echo left channel
 	MOV	A, (0)+Y
+	LSR	A
+	ADC	A, (0)+Y	; Vol = ⌈Vol * 1.5⌉
 	MOV	DSPData, A
 	INC	Y
 
 	SET4	DSPAddr		; echo right channel
 	MOV	A, (0)+Y
+	LSR	A
+	ADC	A, (0)+Y	; Vol = ⌈Vol * 1.5⌉
 	MOV	DSPData, A
 
 	JMP	IncAndFinishEvent
@@ -1559,11 +1568,11 @@ LongNoteOff:
 SetUpEngine:
 	BBC5	GlobalFlags, +	; skip some init on warm reset
 
-	MOV	Y, #64
+	MOV	Y, #96
 	MOV	A, #$C		; Master left volume
-	MOVW	DSPAddr, YA	; = 64
+	MOVW	DSPAddr, YA	; = 96
 	MOV	A, #$1C		; Master right volume
-	MOVW	DSPAddr, YA	; = 64
+	MOVW	DSPAddr, YA	; = 96
 
 	MOV	A, #$5D		; Source directory
 	MOV	Y, #SourceDir>>8

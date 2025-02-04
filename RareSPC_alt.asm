@@ -438,6 +438,8 @@ Preproc_Rest:
 	MOV	TrkPtr_H+X, Y	; store pointer MSB
 +	JMP	FinishPreproc
 ; =============================================================================
+; Set the current channel to fade out.
+; It takes up to 676 samples to fade out smoothly.
 SoftKeyRelease:
 	BBS5	TempFlags, +	; Skip if channel in use by SFX.
 	BBS6	TempFlags, +	; Skip if a note is ready for key-on.
