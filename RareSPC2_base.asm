@@ -809,9 +809,11 @@ PrepareNote:
 	ADC	A, Transpose+X
 	ASL	A
 
-	; fine-tune given pitch with current fine-tune value
-	; with following formula:
-	; P=P+(P*T/1024), where T is signed fine-tune offset
+	; Fine-tune the note using the following formula:
+	; P = ⌊Pb+(Pb*T/1024)⌋, where:
+	; P is the result pitch value;
+	; T is signed fine-tune offset;
+	; Pb is the base pitch value from the LUT.
 	MOV	Y, SndFineTune+X	; is fine-tune value zero?
 	BEQ	SkipTuning	; if yes, branch
 	MOV	X, A
@@ -873,7 +875,7 @@ TuningDone:
 
 	; Copy initial vibrato parameters.
 	MOV	A, VibDelta+X
-	BPL	+	; Delta=abs(Delta)
+	BPL	+	; Δ = abs(Δ)
 	EOR	A, #-1
 	INC	A
 	MOV	VibDelta+X, A
@@ -901,7 +903,7 @@ TuningDone:
 
 	; Downmix stereo to mono.
 	; Vol = ⌊(abs(Vol_L)+abs(Vol_R)+1)/2⌋
-	BPL	+	; Vol=abs(Vol)
+	BPL	+	; Vol = abs(Vol)
 	EOR	A, #-1
 	INC	A
 +	MOV	4, A
@@ -982,7 +984,7 @@ UpdateTrack_2:
 	INC	A
 +	BPL	+		; sign-extend it
 	DEC	Y
-+	MOVW	0, YA	; Store the delta.
++	MOVW	0, YA		; Store the delta.
 
 	DEC	t_PitchSlideSteps+X
 
@@ -1004,7 +1006,7 @@ DoVibrato:
 	MOV	A, VibLen+X
 	MOV	t_VibSteps+X, A
 	MOV	A, VibDelta+X
-	EOR	A, #-1
+	EOR	A, #-1		; Δ = -Δ
 	INC	A
 	MOV	VibDelta+X, A
 
@@ -1138,7 +1140,7 @@ SetBGMVol:
 ; =============================================================================
 MulDiv:
 	; Calculate sound volume using the following formula:
-	; Volume*Modifier/132
+	; ⌊Volume*Modifier/132⌋
 	; Then, clip the result to [-128;127].
 	MOV	Y, BGMVol
 	CMP	X, #8
@@ -1525,15 +1527,15 @@ SetPitchSlide_4:
 	MOV	A, (0)+Y ; delay
 	MOV	PitchSlideDelay+X, A
 	INC	Y
-	MOV	A, (0)+Y ; portamento interval
+	MOV	A, (0)+Y	; portamento interval
 	MOV	PitchSlideInterval+X, A
 	INC	Y
-	MOV	A, (0)+Y ; portamento steps
+	MOV	A, (0)+Y	; portamento steps
 	MOV	PitchSlideStepsDown+X, A
 	ASL	A
 	MOV	PitchSlideSteps+X, A
 	INC	Y
-	MOV	A, (0)+Y ; pitch delta
+	MOV	A, (0)+Y	; pitch delta
 	EOR	A, #-1
 	INC	A
 	MOV	PitchSlideDelta+X, A
@@ -1542,18 +1544,18 @@ SetPitchSlide_4:
 ; Set a back-and-forth pitch slide.
 SetPitchSlide_5:
 	MOV	X, CurrentTrack
-	MOV	A, (0)+Y ; delay
+	MOV	A, (0)+Y	; delay
 	MOV	PitchSlideDelay+X, A
 	INC	Y
-	MOV	A, (0)+Y ; portamento interval
+	MOV	A, (0)+Y	; portamento interval
 	MOV	PitchSlideInterval+X, A
 	INC	Y
-	MOV	A, (0)+Y ; portamento steps
+	MOV	A, (0)+Y	; portamento steps
 	MOV	PitchSlideStepsDown+X, A
 	ASL	A
 	MOV	PitchSlideSteps+X, A
 	INC	Y
-	MOV	A, (0)+Y ; pitch delta
+	MOV	A, (0)+Y	; pitch delta
 	MOV	PitchSlideDelta+X, A
 	JMP	IncAndFinishEvent
 ; =============================================================================
