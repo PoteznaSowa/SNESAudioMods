@@ -54,7 +54,8 @@ Bug fixes:
 - removed a minor race condition which would make a pitch modifier for SFX at channel #5 inconsistent from time to time;
 - voice L/R volume is correctly scaled even by very high values of BGM volume;
 - fixed a crash due to messages from SNES to play SFX at an invalid channel in Castle Crush;
-- fixed the echo buffer overwriting a $FF00..$FF03 memory region used by the Nuts and Bolts sample set.
+- fixed the echo buffer overwriting a $FF00..$FF03 memory region used by the Nuts and Bolts sample set;
+- reduced some audio clipping/distortion.
 
 Removed unused features (possible leftovers from Rareware games before DKC2):
 - processing messages $F8 and $F9 which have totally no effect;
