@@ -61,8 +61,5 @@ Removed unused features (possible leftovers from Rareware games before DKC2):
 - processing messages $F8 and $F9 which have totally no effect;
 - tremolo processing, as there is no way to enable it.
 
-Known issues:
-- occasional audio clipping/distortion due to too high voice L/R levels.
-
 TODO:
 - refactor code comments.
