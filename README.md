@@ -17,6 +17,7 @@ Bug fixes:
 - voice pitch value will no longer get out of bounds, especially when processing pitch bends;
 - if a song does not initialise ADSR parameters, default ones will be used;
 - fixed BGM voice echo on/off events interfering with an SFX playing on the same channel.
+- reduced some audio clipping/distortion caused by too high L/R levels.
 
 Removed unused features:
 - downmixing stereo to mono, as the game does not even have an option to toggle the stereo/mono mode;
@@ -25,7 +26,6 @@ Removed unused features:
 - voice volume and ADSR presets.
 
 Known issues:
-- occasional audio clipping/distortion due to too high voice L/R levels;
 - some samples missing in sample sets (not a bug in the engine).
 
 TODO:
@@ -55,7 +55,7 @@ Bug fixes:
 - voice L/R volume is correctly scaled even by very high values of BGM volume;
 - fixed a crash due to messages from SNES to play SFX at an invalid channel in Castle Crush;
 - fixed the echo buffer overwriting a $FF00..$FF03 memory region used by the Nuts and Bolts sample set;
-- reduced some audio clipping/distortion.
+- reduced some audio clipping/distortion caused by too high L/R levels.
 
 Removed unused features (possible leftovers from Rareware games before DKC2):
 - processing messages $F8 and $F9 which have totally no effect;
