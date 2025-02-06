@@ -217,6 +217,8 @@ GetMessage:	; $606
 	;BEQ	SetMonoFlag
 
 	; Play SFX.
+	MOV	CurPreprocTrack, X
+	SET3	CurPreprocTrack
 	CALL	PlaySFX
 	JMP	GetMessage
 ; -----------------------------------------------------------------------------

@@ -307,6 +307,8 @@ GetMessage:
 
 	CMP	Y, #8
 	BCS	GetMessage	; Do not set up a SFX on an invalid channel.
+	MOV	CurPreprocTrack, Y
+	SET3	CurPreprocTrack
 	CALL	PlaySFX
 	JMP	GetMessage
 ; =============================================================================
@@ -493,6 +495,21 @@ Preproc_Rest:
 	MOV	TrkPtr_H+X, Y	; store pointer MSB
 +	JMP	FinishPreproc
 ; =============================================================================
+GotoPlayIndexedBGM:
+	MOV	0, Y
+
+	; Set all channels to fade out.
+	MOV	A, #7
+	MOV	Y, #$BF		; Exponential fade-out, rate 15
+-	MOVW	DSPAddr, YA
+	CLR1	DSPAddr
+	CLR7	DSPData
+	ADC	A, #$10
+	BPL	-
+
+	MOV	Y, 0
+	JMP	PlayIndexedBGM
+; =============================================================================
 ; Enable the monaural mode if argument non-zero.
 SetMonoFlag:
 	CLR4	GlobalFlags	; Clear the "monaural mode" flag.
@@ -559,13 +576,23 @@ AdjustSFXVol:
 ; =============================================================================
 ; Start processing music and sound effects.
 StartEngine:
-	SET0	GlobalFlags
+	MOV	ControlReg, #0
+
+	;MOV	ControlReg, Y
+	;MOVW	Timer0, YA	; Set timers 0 and 1 to 32 ms.
+
 	MOV	A, #$6C
 	MOV	Y, #0
 	MOVW	DSPAddr, YA
+
+	MOV	A, #192
+	MOV	Y, A
+	MOVW	Timer0, YA	; Set timers 0 and 1 to 24 ms.
+
 	MOV	ControlReg, #3	; Start timers 0 and 1.
 	CALL	TempoToInterval2
 	MOV	Timer1, #100	; Set timer 1 to 12.5 ms.
+	SET0	GlobalFlags
 	JMP	GetMessage
 ; =============================================================================
 ; Stop the engine and enter transfer mode.
@@ -616,7 +643,7 @@ GotoTransferMode:
 ; =============================================================================
 MessageIndex:
 	DW	MessageF8, MessageF9		; $F8, $F9
-	DW	SetMonoFlag, PlayIndexedBGM	; $FA, $FB
+	DW	SetMonoFlag, GotoPlayIndexedBGM	; $FA, $FB
 	DW	AdjustSFXPitch, AdjustSFXVol	; $FC, $FD
 	DW	StartEngine, GotoTransferMode	; $FE, $FF
 ; =============================================================================
@@ -1140,20 +1167,24 @@ SetBGMVol:
 ; =============================================================================
 MulDiv:
 	; Calculate sound volume using the following formula:
-	; ⌊Volume*Modifier/132⌋
+	; ⌊(Volume*Modifier+68)/133⌋
 	; Then, clip the result to [-128;127].
 	MOV	Y, BGMVol
 	CMP	X, #8
 	BCC	+		; don't change volume for SFXs
 	MOV	Y, #100
-+	MOV	X, #132		; Vol ≈ Vol * 3 / 4
++	MOV	X, #133		; Vol ≈ Vol * 3 / 4
 	OR	A, #0
 MulDiv2:
+	CLRC
 	BMI	.minus
 	MUL	YA
-	DIV	YA, X
+	ADC	A, #68
+	BCC	+
+	INC	Y
++	DIV	YA, X
 	BMI	+	; branch if A >= 128
-	BVS	+	; Unlikely, but branch on overflow.
+	BVS	+
 	MOV	X, CurrentTrack
 	RET
 ; -----------------------------------------------------------------------------
@@ -1165,9 +1196,12 @@ MulDiv2:
 	EOR	A, #-1
 	INC	A
 	MUL	YA
-	DIV	YA, X
+	ADC	A, #68
+	BCC	+
+	INC	Y
++	DIV	YA, X
 	BMI	+	; branch if A >= 128
-	BVS	+	; Unlikely, but branch on overflow.
+	BVS	+
 	EOR	A, #-1
 	INC	A
 	MOV	X, CurrentTrack
@@ -1595,15 +1629,9 @@ SetUpEngine:
 -	MOV	SndFIRShadow-1+Y, A
 	DBNZ	Y, -
 
-+	MOV	A, #$5C		; Key-off
-	MOV	Y, #-1
-	MOVW	DSPAddr, YA
-
-	MOV	BGMVol, #100
++	MOV	BGMVol, #100
 	MOV	A, #0
-	MOV	ControlReg, A
 	MOV	Y, A
-	MOVW	Timer0, YA		; Set timers 0 and 1 to 32 ms.
 	MOVW	GlobalFlags, YA		; Also clears CurPreprocTrack.
 	MOV	SFXDelay, #1
 
