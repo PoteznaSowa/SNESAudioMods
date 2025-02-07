@@ -725,11 +725,37 @@ TuningDone:
 	MOV	DSPAddr, CurVoiceAddr
 
 	MOV	A, SndVol_L+X
-	MOV	DSPData, A	; left channel volume
+	BPL	+
+	SETC
+	ROR	A
+	CLRC
+	ADC	A, SndVol_L+X
+	ROR	A
+	JMP	++
+; -----------------------------------------------------------------------------
++	LSR	A
+	ADC	A, SndVol_L+X
+	LSR	A
+	ADC	A, #0
+++	MOV	DSPData, A	; left channel volume
 	INC	DSPAddr
+
 	MOV	A, SndVol_R+X
-	MOV	DSPData, A	; right channel volume
+	BPL	+
+	SETC
+	ROR	A
+	CLRC
+	ADC	A, SndVol_R+X
+	ROR	A
+	JMP	++
+; -----------------------------------------------------------------------------
++	LSR	A
+	ADC	A, SndVol_R+X
+	LSR	A
+	ADC	A, #0
+++	MOV	DSPData, A	; right channel volume
 	INC	DSPAddr
+
 	MOV	DSPData, 2	; LSB of pitch value
 	INC	DSPAddr
 	MOV	DSPData, 3	; MSB of pitch value
@@ -1137,11 +1163,15 @@ SetEchoParams:	; $D71
 
 	MOV	DSPAddr, #DSP_EVOLL
 	MOV	A, (0)+Y
+	LSR	A
+	ADC	A, (0)+Y	; Vol = ⌈Vol * 1.5⌉
 	MOV	DSPData, A
 	INC	Y
 
 	SET4	DSPAddr	; DSP_EVOLR
 	MOV	A, (0)+Y
+	LSR	A
+	ADC	A, (0)+Y	; Vol = ⌈Vol * 1.5⌉
 	MOV	DSPData, A
 	JMP	IncAndFinishEvent
 ; =============================================================================
@@ -1378,11 +1408,11 @@ SetUpEngine:	; $1076
 	SET4	DSPAddr		; echo delay
 	MOV	DSPData, #4	; = 64 ms
 
-	MOV	Y, #64
+	MOV	Y, #96
 	MOV	A, #$C		; master left volume
-	MOVW	DSPAddr, YA	; = 64
+	MOVW	DSPAddr, YA	; = 96
 	MOV	A, #$1C		; master right volume
-	MOVW	DSPAddr, YA	; = 64
+	MOVW	DSPAddr, YA	; = 96
 
 	MOV	A, #$5D		; source directory (instrument table)
 	MOV	Y, #SourceDir>>8
