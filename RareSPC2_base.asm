@@ -35,13 +35,15 @@ GlobalFlags:	skip 1
 
 CurPreprocTrack:	skip 1	; number of channel to be preprocessed
 BGMTempo:	skip 1
-SndPitchOffset:	skip 2	; Current pitch offset for SFX channel #5
+SndPitchOffset:	skip 2	; Current SFX channel #5 pitch offset
 SFXDelay:	skip 1	; Initial SFX length
-BGMVol:		skip 1	; current BGM volume
+BGMVol:		skip 1	; Current BGM volume
 VolPreset1_L:	skip 1	; Global voice volume presets
 VolPreset1_R:	skip 1
 VolPreset2_L:	skip 1
 VolPreset2_R:	skip 1
+SndVolLShadow:	skip 1	; Current SFX channel #5 volume
+SndVolRShadow:	skip 1
 
 	ORG	$20
 
@@ -558,21 +560,28 @@ AdjustSFXPitch:
 ++	JMP	GetMessage
 ; =============================================================================
 ; Change the volume of SFX at channel #5.
-; Volume = Volume * Modifier / 100
+; Volume = ⌊Volume * Modifier / 100⌋
 AdjustSFXVol:
+	BBC7	SndFlags+8+5, +	; Do not bother if the SFX inaudible.
 	MOV	0, Y
 	MOV	DSPAddr, #$50
+	MOV	4, #0
 	MOV	X, #100
-	MOV	A, DSPData
+	MOV	A, SndVolLShadow
 	CALL	MulDiv2
+	MOV	SndVolLShadow, A
+	CALL	GetThreeQuarters
 	MOV	DSPData, A
 	INC	DSPAddr
 	MOV	Y, 0
+	MOV	4, #0
 	MOV	X, #100
-	MOV	A, DSPData
+	MOV	A, SndVolRShadow
 	CALL	MulDiv2
+	MOV	SndVolRShadow, A
+	CALL	GetThreeQuarters
 	MOV	DSPData, A
-	JMP	GetMessage
++	JMP	GetMessage
 ; =============================================================================
 ; Start processing music and sound effects.
 StartEngine:
@@ -608,18 +617,18 @@ GotoTransferMode:
 
 	; Fade out FIR filter taps.
 	MOV	DSPAddr, #$F
--	MOV	A, DSPData
+.f1:	MOV	A, DSPData
 	BPL	+
 	INC	DSPData
-	BNE	-
+	BNE	.f2
 +	BEQ	+
-	DBNZ	DSPData, -
+	DBNZ	DSPData, .f3
 +	ADC	DSPAddr, #$10
-	BPL	-
+	BPL	.f1
 
 	MOV	A, #$7D
 	MOV	Y, #0
-	MOVW	DSPAddr, YA	; set echo delay to 0
+	MOVW	DSPAddr, YA	; Set echo delay to 0.
 
 	MOV	A, Y
 	MOV	Y, #8
@@ -637,9 +646,15 @@ GotoTransferMode:
 
 	MOV	A, #$6C
 	MOV	Y, #$E0
-	MOVW	DSPAddr, YA
+	MOVW	DSPAddr, YA	; Disable sound output and echo writes.
 
 	JMP	TransferMode	; Enter transfer mode.
+; -----------------------------------------------------------------------------
+	; Add some delay to the loop, so that the FIR tap value is changed
+	; exactly every 32 cycles (1 sample).
+.f2:	MOV	A, 0
+.f3:	DIV	YA, X
+	BRA	.f1
 ; =============================================================================
 MessageIndex:
 	DW	MessageF8, MessageF9		; $F8, $F9
@@ -890,6 +905,10 @@ TuningDone:
 	MOV	A, #0
 	MOV	Y, A
 	MOVW	SndPitchOffset, YA
+	MOV	A, SndVol_R+X
+	MOV	Y, A
+	MOV	A, SndVol_L+X
+	MOVW	SndVolLShadow, YA	; Also sets SndVolRShadow
 +
 
 	; Copy initial pitch slide parameters.
@@ -1167,23 +1186,25 @@ SetBGMVol:
 ; =============================================================================
 MulDiv:
 	; Calculate sound volume using the following formula:
-	; ⌊(Volume*Modifier+68)/133⌋
+	; ⌊(Volume*Modifier+100)/133⌋
 	; Then, clip the result to [-128;127].
-	MOV	Y, BGMVol
 	CMP	X, #8
-	BCC	+		; don't change volume for SFXs
-	MOV	Y, #100
-+	MOV	X, #133		; Vol ≈ Vol * 3 / 4
+	BCS	GetThreeQuarters	; don't change volume for SFXs
+	MOV	Y, BGMVol
+	MOV	X, #133		; Vol ≈ Vol * 3 / 4
+	MOV	4, #100
 	OR	A, #0
 MulDiv2:
 	CLRC
 	BMI	.minus
+
+	; A = min(⌊(A * Y + 100) / 133⌋, 127)
 	MUL	YA
-	ADC	A, #68
+	ADC	A, 4
 	BCC	+
 	INC	Y
 +	DIV	YA, X
-	BMI	+	; branch if A >= 128
+	BMI	+	; A = min(A, 127)
 	BVS	+
 	MOV	X, CurrentTrack
 	RET
@@ -1193,14 +1214,15 @@ MulDiv2:
 	RET
 ; -----------------------------------------------------------------------------
 .minus:
+	; A = -min(⌊(-A * Y + 100) / 133⌋, 128)
 	EOR	A, #-1
 	INC	A
 	MUL	YA
-	ADC	A, #68
+	ADC	A, 4
 	BCC	+
 	INC	Y
 +	DIV	YA, X
-	BMI	+	; branch if A >= 128
+	BMI	+	; A = -min(A, 128)
 	BVS	+
 	EOR	A, #-1
 	INC	A
@@ -1209,6 +1231,22 @@ MulDiv2:
 ; -----------------------------------------------------------------------------
 +	MOV	A, #-128
 	MOV	X, CurrentTrack
+	RET
+; -----------------------------------------------------------------------------
+GetThreeQuarters:
+	MOV	4, A
+	CMP	A, #$80
+	BCS	+
+	LSR	A
+	ADC	A, 4
+	LSR	A
+	ADC	A, #0
+	RET
+; -----------------------------------------------------------------------------
++	ROR	A
+	CLRC
+	ADC	A, 4
+	ROR	A
 	RET
 ; =============================================================================
 SetVolumePreset:
@@ -1896,7 +1934,8 @@ PitchTable:
 	; Real SNES hardware tends to have a slightly, although not usually
 	; audibly, higher audio sample rate than the nominal one of 32000 Hz.
 	; Hence, the values here should be rounded down.
-	DW	0
+	; PitchTable[i] = ⌊64 * 2 ^ ((i - 1) / 12)⌋
+	DW	60
 	DW	64,	67,	71,	76,	80,	85
 	DW	90,	95,	101,	107,	114,	120
 	DW	128,	135,	143,	152,	161,	170
@@ -1914,4 +1953,3 @@ PitchTable:
 	DW	8192,	8679,	9195,	9741,	10321,	10935
 	DW	11585,	12274,	13003,	13777,	14596,	15464
 	DW	16383
-
