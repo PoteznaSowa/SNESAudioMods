@@ -52,7 +52,7 @@ SndVolRShadow:	skip 1
 ; 1: long duration on
 ; 2: echo on
 ; 3: noise on
-; 5: overridden by SFX
+; 5: DSP channel held by SFX
 ; 6: ready for key-on
 ; 7: track audible (no rest)
 SndFlags:	skip 16
@@ -177,6 +177,11 @@ SFXPtrTable1 =		$2E96
 
 SourceDir =		$3100
 EchoBufEnd =		$FEFE
+
+
+macro	NegateA()
+	EOR A, #-1 : INC A
+endmacro
 
 
 	arch spc700
@@ -309,8 +314,6 @@ GetMessage:
 
 	CMP	Y, #8
 	BCS	GetMessage	; Do not set up a SFX on an invalid channel.
-	MOV	CurPreprocTrack, Y
-	SET3	CurPreprocTrack
 	CALL	PlaySFX
 	JMP	GetMessage
 ; =============================================================================
@@ -345,7 +348,7 @@ MainLoop:
 +	SET2	GlobalFlags
 	MOV	CurrentTrack, #0
 	CALL	UpdateTracks
-++	JMP	GetMessage
+	JMP	GetMessage
 ; -----------------------------------------------------------------------------
 SkipBGMUpdate2:
 	CLR2	GlobalFlags
@@ -394,35 +397,22 @@ PreprocessTracks:
 	JMP	GetMessage
 ; =============================================================================
 PreprocessTracks2:
-	CLR4	CurPreprocTrack
 	MOV	X, CurPreprocTrack
-	INC	CurPreprocTrack
 
 	MOV	A, SndFlags+X	; Load track flags.
 	MOV	TempFlags, A
 	BBC0	TempFlags, SkipPreproc	; Branch if not active.
 	BBS6	TempFlags, SkipPreproc	; Branch if ready for key-on.
-	MOV	A, NoteDur_H+X
-	BNE	SkipPreproc
-	CMP	X, #8
-	BCS	+
-	MOV	A, NoteDur_L+X
-	CMP	A, #3
-	BCS	SkipPreproc
-+
 
 	; Prepare the DSP address and voice bitmask variables.
-	; Also, read the ENVX register to check if the channel is audible.
-	MOV	A, X
-	AND	A, #7	; Limit to 0..7.
-	MOV	Y, A
-	XCN	A	; A <<= 4
+	MOV	A, DSPAddrLUT+X
 	MOV	CurVoiceAddr, A	; We have a DSP channel address.
-	OR	A, #8		; Go to ENVX register.
+	OR	A, #8
 	MOV	DSPAddr, A
-	MOV	A, VoiceBitMask+Y	; Get the bitmask for the channel.
+	MOV	A, VoiceBitMask+X
 	MOV	CurVoiceBit, A
 
+	; Read the ENVX register to check if the channel is audible.
 	; Mark the channel as silent if the ADSR envelope falls to zero.
 	MOV	A, DSPData	; Read the current ADSR envelope level.
 	CMP	A, SndEnvLvl+X	; Compare with the level measured earlier.
@@ -430,7 +420,7 @@ PreprocessTracks2:
 	BCS	+	; Branch if the envelope is not ramping down.
 	MOV	Y, A	; Has it fallen to zero though?
 	BNE	+	; Branch if not.
-	CLR7	TempFlags	; Clear the "channel audible" flag.
+	CLR7	TempFlags	; Clear the ‘channel audible’ flag.
 
 +	MOV	CurrentTrack, X
 	MOV	A, TrkPtr_L+X	; load the track pointer
@@ -448,7 +438,7 @@ PreprocessTracks2:
 	BEQ	FinishPreproc	; branch if it must always be run synchronously
 	BBS7	TempFlags, FinishPreproc	; Branch if the track is audible.
 
-+	SET3	GlobalFlags	; Set the "async sound events" flag.
++	SET3	GlobalFlags	; Set the ‘async sound events’ flag.
 	MOV	Y, #1	; Go to the next track byte.
 	MOV	A, 2
 	ASL	A
@@ -464,11 +454,13 @@ Preproc_RestOrNote:
 	BBS5	TempFlags, FinishPreproc	; Branch if the channel in use by SFX.
 
 	CALL	PrepareNote	; Prepare a note for key-on.
-	SET6	TempFlags	; Set the "ready for key-on" flag.
+	SET6	TempFlags	; Set the ‘ready for key-on’ flag.
 FinishPreproc:
 	MOV	A, TempFlags	; Save track flags.
 	MOV	SndFlags+X, A
 SkipPreproc:
+	INC	CurPreprocTrack
+	CLR4	CurPreprocTrack
 	RET
 ; -----------------------------------------------------------------------------
 Preproc_Rest:
@@ -480,8 +472,7 @@ Preproc_Rest:
 	MOV	3, A	; set duration MSB
 	JMP	++
 ; -----------------------------------------------------------------------------
-+	MOV	A, #0		; Placeholder value.
-	BBC1	TempFlags, +	; Branch if long duration mode off.
++	BBC1	TempFlags, +	; Branch if long duration mode off.
 	MOV	A, (0)+Y	; Get duration MSB.
 	INC	Y
 +	MOV	3, A
@@ -494,16 +485,17 @@ Preproc_Rest:
 	INCW	2	; Treat zero duration as one.
 +	MOV	A, NoteDur_L+X
 	MOV	Y, NoteDur_H+X
-	ADDW	YA, 2	; Add the rest length to the current rest duration.
-	BCS	+	; Branch if the result does not fit into 16 bits.
+	ADDW	YA, 2		; Add the rest length to the current rest duration.
+	BCS	FinishPreproc	; Branch if the result does not fit into 16 bits.
 	MOV	NoteDur_L+X, A	; Store the result.
 	MOV	NoteDur_H+X, Y
 	MOV	A, 4
+FinishPreproc2:
 	MOV	Y, #0
 	ADDW	YA, 0	; Add the track offset to the pointer.
 	MOV	TrkPtr_L+X, A	; store pointer LSB
 	MOV	TrkPtr_H+X, Y	; store pointer MSB
-+	JMP	FinishPreproc
+	JMP	FinishPreproc
 ; =============================================================================
 GotoPlayIndexedBGM:
 	MOV	0, Y
@@ -513,7 +505,7 @@ GotoPlayIndexedBGM:
 	MOV	Y, #$BF		; Exponential fade-out, rate 15
 -	MOVW	DSPAddr, YA
 	CLR1	DSPAddr
-	CLR7	DSPData
+	CLR7	DSPData		; Switch to GAIN envelope mode.
 	ADC	A, #$10
 	BPL	-
 
@@ -615,7 +607,7 @@ GotoTransferMode:
 	MOV	Y, #$BF		; Exponential fade-out, rate 15
 -	MOVW	DSPAddr, YA
 	CLR1	DSPAddr
-	CLR7	DSPData
+	CLR7	DSPData		; Switch to GAIN envelope mode.
 	ADC	A, #$10
 	BPL	-
 
@@ -676,7 +668,7 @@ SoftKeyRelease:
 	MOV	Y, #$BF		; Exponential fade-out, rate 15
 	MOVW	DSPAddr, YA
 	CLR1	DSPAddr
-	CLR7	DSPData
+	CLR7	DSPData		; Switch to GAIN envelope mode.
 	MOV	A, #1
 	MOV	SndEnvLvl+X, A	; The ADSR envelope will be ramping down.
 +	RET
@@ -749,7 +741,7 @@ FinishTrackUpdate:
 	MOVW	DSPAddr, YA
 
 	; Wait a little bit to work around a buggy SPC dumper in Snes9x.
-	MUL	YA
+	DIV	YA, X
 
 +	RET
 ; -----------------------------------------------------------------------------
@@ -771,21 +763,20 @@ FetchNextEvent2:
 SetInstrument:
 	MOV	X, CurrentTrack
 	MOV	A, (0)+Y
-	MOV	SndTimbre+X, A	; Store the logical instrument index.
+	MOV	SndTimbre+X, A	; Store logical instrument index.
 
 IncAndFinishEvent:
 	INC	Y
 FinishEvent:
-	BBC3	GlobalFlags, FetchNextEvent2
+	BBC3	GlobalFlags, FetchNextEvent2	; Branch if not async.
 
 	MOV	X, CurrentTrack
 	MOV	A, Y
 	MOV	Y, #0
 	ADDW	YA, 0
-	MOV	TrkPtr_L+X, A	; store pointer LSB
-	MOV	TrkPtr_H+X, Y	; store pointer MSB
-	DEC	CurPreprocTrack		; Process the track again.
-	MOV	A, TempFlags		; Store the flags.
+	MOV	TrkPtr_L+X, A	; Store pointer LSB.
+	MOV	TrkPtr_H+X, Y	; Store pointer MSB.
+	MOV	A, TempFlags	; Store flags.
 	MOV	SndFlags+X, A
 	RET
 ; =============================================================================
@@ -822,16 +813,18 @@ SetDuration:
 	MOV	NoteDur_L+X, A
 	INC	Y
 
-++	MOV	A, Y
+++	MOV	A, NoteDur_L+X
+	OR	A, NoteDur_H+X
+	BNE	+
+	INC	NoteDur_L+X	; Treat zero duration as one.
++
+FinishTrackUpdate2:
+	MOV	A, Y
 	MOV	Y, #0
 	ADDW	YA, 0
 	MOV	TrkPtr_L+X, A	; store pointer LSB
 	MOV	TrkPtr_H+X, Y	; store pointer MSB
-	MOV	A, NoteDur_L+X
-	OR	A, NoteDur_H+X
-	BNE	+
-	INC	NoteDur_L+X	; Treat zero duration as one.
-+	MOV	A, TempFlags
+	MOV	A, TempFlags
 	MOV	SndFlags+X, A
 	JMP	FinishTrackUpdate
 ; =============================================================================
@@ -1094,31 +1087,28 @@ WritePitchDelta:
 EndOfTrack:
 	MOV	X, CurrentTrack
 	DEC	Y
-	MOV	A, Y
-	MOV	Y, #0
-	ADDW	YA, 0
-	MOV	TrkPtr_L+X, A	; store pointer LSB
-	MOV	TrkPtr_H+X, Y	; store pointer MSB
-	BBS5	TempFlags, +
-	BBC7	TempFlags, +
+
+	; If the channel is still audible, we will come back here later.
+	BBS5	TempFlags, +	; Branch if the BGM channel is muted by SFX
+	BBC7	TempFlags, +	; Branch if inaudible anyway
 	MOV	A, CurVoiceAddr
 	OR	A, #8
 	MOV	DSPAddr, A
 	MOV	A, DSPData
-	BNE	.ret	; if the channel is still audible, we will come back here later
+	BNE	.ret
+
 +	AND	TempFlags, #$20
 	CMP	X, #8
 	BCC	.ret
 	MOV	A, SndFlags-8+X
 	AND	A, #$DF
-	MOV	SndFlags-8+X, A
+	MOV	SndFlags-8+X, A	; Unmute the corresponding BGM channel.
 
-.ret:	MOV	A, TempFlags
-	MOV	SndFlags+X, A
-	BBS3	GlobalFlags, +
-	JMP	FinishTrackUpdate
+.ret:	BBS3	GlobalFlags, +
+	JMP	FinishTrackUpdate2
 ; -----------------------------------------------------------------------------
-+	RET
++	MOV	A, Y
+	JMP	FinishPreproc2
 ; =============================================================================
 SetVoiceParams:
 	MOV	X, CurrentTrack
@@ -1193,16 +1183,16 @@ SetBGMVol:
 +	JMP	IncAndFinishEvent
 ; =============================================================================
 MulDiv:
-	; Calculate sound volume using the following formula:
+	; Calculate sound volume for BGM using the following formula:
 	; ⌊(Volume*Modifier+100)/133⌋
 	; Then, clip the result to [-128;127].
 	CMP	X, #8
-	BCS	GetThreeQuarters	; don't change volume for SFXs
+	BCS	GetThreeQuarters
 	MOV	Y, BGMVol
 	MOV	X, #133		; Vol ≈ Vol * 3 / 4
 	MOV	4, #100
 	OR	A, #0
-MulDiv2:
+MulDiv2:	; from AdjustSFXVol
 	CLRC
 	BMI	.minus
 
@@ -1213,7 +1203,7 @@ MulDiv2:
 	INC	Y
 +	DIV	YA, X
 	BMI	+	; A = min(A, 127)
-	BVS	+
+	;BVS	+
 	MOV	X, CurrentTrack
 	RET
 ; -----------------------------------------------------------------------------
@@ -1231,7 +1221,7 @@ MulDiv2:
 	INC	Y
 +	DIV	YA, X
 	BMI	+	; A = -min(A, 128)
-	BVS	+
+	;BVS	+
 	EOR	A, #-1
 	INC	A
 	MOV	X, CurrentTrack
@@ -1247,8 +1237,8 @@ GetThreeQuarters:
 	BCS	+
 	LSR	A
 	ADC	A, 4
+	INC	A
 	LSR	A
-	ADC	A, #0
 	RET
 ; -----------------------------------------------------------------------------
 +	ROR	A
@@ -1759,7 +1749,7 @@ PlaySFX:
 	BNE	+
 	CLR5	DSPData		; Linear fade-out, rate 15
 +	CLR1	DSPAddr
-	CLR7	DSPData
+	CLR7	DSPData		; Switch to GAIN envelope mode.
 	MOV	A, #1
 	MOV	SndEnvLvl+8+X, A	; The ADSR envelope will be ramping down.
 
@@ -1829,6 +1819,10 @@ PlaySFX:
 ; =============================================================================
 VoiceBitMask:
 	DB	1, 2, 4, 8, $10, $20, $40, $80
+	DB	1, 2, 4, 8, $10, $20, $40, $80
+DSPAddrLUT:
+	DB	0, $10, $20, $30, $40, $50, $60, $70
+	DB	0, $10, $20, $30, $40, $50, $60, $70
 ; =============================================================================
 TrackEventIndex:
 	; See https://loveemu.hatenablog.com/entry/20130819/SNES_Rare_Music_Spec for details
