@@ -3,6 +3,8 @@
 ## Donkey Kong Country SPC engine (RareSPC.asm)
 Based on the disassembly of the original design, the audio engine used in Rare’s Donkey Kong Country was almost completely rewritten to add new features, fix bugs, remove dead code, and increase overall performance.
 
+![Donkey Kong Country Dancing](https://c.tenor.com/NnS970hbDPEAAAAC/tenor.gif)
+
 Added features:
 - score data processing in the background when being idle;
 - smooth BGM timer ticks by running an SPC700’s timer at a variable period;
@@ -33,6 +35,8 @@ TODO:
 
 ## Donkey Kong Country 2/3 SPC engine (dkq_spc.asm, dkdt_spc.asm)
 Like a previous one, this engine also underwent many improvements in its code.
+
+![Diddy Kong Boombox](https://media.tenor.com/PfkQubt0AZsAAAAi/diddy-kong-donkey-kong.gif)
 
 Added features:
 - score data processing in the background when being idle;
