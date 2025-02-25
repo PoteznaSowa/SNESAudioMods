@@ -9,6 +9,7 @@
 ;   using a single fixed-period timer in the original design;
 ; - removed mixing-out stereo which is anyway not used in the game
 
+
 hirom
 
 ; Page 0 variables
@@ -1387,6 +1388,8 @@ EventTypeTable:
 	DB	1	; individual effect
 	DB	1	; individual effect
 ; =============================================================================
+!brr_test =	0
+
 SetUpEngine:	; $1076
 	MOV	Y, #0
 	BBC4	GlobalFlags, +	; skip some init on warm reset
@@ -1424,6 +1427,65 @@ SetUpEngine:	; $1076
 	MOV	A, Y	; A = 0
 	MOV	ControlReg, A
 	MOVW	Timer0, YA		; Set timers 0 and 1 to 32ms.
+
+	if	!brr_test
+	BBC4	GlobalFlags, +
+
+	MOV	Y, #-128
+	MOV	A, #$C
+	MOVW	DSPAddr, YA
+	MOV	A, #$1C
+	MOVW	DSPAddr, YA
+
+	MOV	A, #0
+	MOVW	DSPAddr, YA
+
+	INC	A
+	MOVW	DSPAddr, YA
+
+	INC	A
+	MOV	Y, #16
+	MOVW	DSPAddr, YA
+
+	INC	A
+	MOV	Y, #0
+	MOVW	DSPAddr, YA
+
+	INC	A
+	MOV	Y, #4
+	MOVW	DSPAddr, YA
+
+	INC	A
+	MOV	Y, #$FF
+	MOVW	DSPAddr, YA
+
+	INC	A
+	MOV	Y, #$E0
+	MOVW	DSPAddr, YA
+
+	MOV	A, #BRRTestPulse&$FF
+	MOV	SourceDir+16, A
+	MOV	A, #BRRTestPulse>>8
+	MOV	SourceDir+17, A
+
+	MOV	A, #$5C
+	MOV	Y, #0
+	MOVW	DSPAddr, YA
+
+	MOV	A, #$4C
+	MOV	Y, #1
+	MOVW	DSPAddr, YA
+
+	MOV	DSPAddr, #8
+-	MOV	A, DSPData
+	BEQ	-
+-	MOV	A, DSPData
+	BNE	-
+
+	MOV	Y, A
++
+	endif		; !brr_test
+
 	MOVW	GlobalFlags, YA		; Also clears CurPreprocTrack.
 	MOV	SFXDivCounter, #7
 	MOV	MiscDivCounter, #4
@@ -1476,6 +1538,16 @@ SetUpEngine:	; $1076
 	MOV	A, MusicData+16
 	MOV	BGMTempo, A
 	RET
+; =============================================================================
+; After a little research, I have found out that:
+; - any BRR sample/source should have 3 samples of padding at the beginning;
+; - a one-shot sample should have 28 samples of padding at the end.
+	if	!brr_test
+BRRTestPulse:
+	DB	$C0, $00, $07, $77, $77, $77, $77, $77, $77
+	DB	$C0, $77, $77, $00, $00, $00, $00, $00, $00
+	DB	$01
+	endif
 ; =============================================================================
 PlaySFX:	; $1178
 	; inputs:
