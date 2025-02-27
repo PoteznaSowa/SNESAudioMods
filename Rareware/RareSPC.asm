@@ -9,7 +9,6 @@
 ;   using a single fixed-period timer in the original design;
 ; - removed mixing-out stereo which is anyway not used in the game
 
-
 hirom
 
 ; Page 0 variables
@@ -35,6 +34,7 @@ CurPreprocTrack:	skip 1	; number of channel to be preprocessed
 BGMTempo:	skip 1
 SFXDivCounter:		skip 1
 MiscDivCounter:		skip 1
+ActiveSFXCount:	skip 1
 
 	ORG	$20
 
@@ -247,10 +247,10 @@ GotoTransferMode:	; $71F
 	BPL	-
 
 	; Fade out echo feedback.
--	MOV	DSPAddr, #$D
+.d1:	MOV	DSPAddr, #$D
 	MOV	A, DSPData
 	BEQ	+
-	DBNZ	DSPData, -
+	DBNZ	DSPData, .d2
 +
 
 	MOV	Y, PrevMsg
@@ -263,6 +263,10 @@ GotoTransferMode:	; $71F
 	BPL	-
 
 	JMP	TransferMode
+; -----------------------------------------------------------------------------
+.d2:	MUL	YA
+	NOP
+	BRA	.d1
 ; =============================================================================
 StartSound:	; $643
 	SET0	GlobalFlags
@@ -275,7 +279,7 @@ StartSound:	; $643
 ; Events are strictly prioritised in the following order:
 ; - messsages from SNES;
 ; - Timer 0 (BGM) ticks;
-; - Timer 1 (SFX) ticks.
+; - Timer 1 (SFX) ticks (SFX first, then per-voice effects).
 ; If none is happening at the moment, do one iteration of asynchronous sound
 ; sequence processing.
 MainLoop:	; $649
@@ -293,9 +297,7 @@ MainLoop:	; $649
 SkipBGMUpdate2:
 	CLR2	GlobalFlags
 SkipBGMUpdate:
-	MOV	A, Timer1_out		; has the main timer ticked?
-	BEQ	PreprocessTracks	; branch if no
-	MOV	0, A
+	MOV	0, Timer1_out
 	CLRC
 	ADC	SFXDivCounter, 0
 	ADC	MiscDivCounter, 0
@@ -306,9 +308,10 @@ SkipBGMUpdate:
 
 	MOV	CurrentTrack, #8
 	CALL	UpdateTracks
-
+	JMP	GetMessage
+; -----------------------------------------------------------------------------
 +	CMP	MiscDivCounter, #5
-	BCC	FinishSFX
+	BCC	PreprocessTracks
 	SBC	MiscDivCounter, #5
 
 	MOV	CurrentTrack, #0
@@ -919,6 +922,7 @@ EndOfTrack:
 	MOV	A, SndFlags-8+X
 	AND	A, #$DF
 	MOV	SndFlags-8+X, A	; Unmute the corresponding BGM channel.
+	DEC	ActiveSFXCount
 
 .ret:	BBS3	GlobalFlags, +
 	JMP	FinishTrackUpdate2
@@ -1489,6 +1493,7 @@ SetUpEngine:	; $1076
 	MOVW	GlobalFlags, YA		; Also clears CurPreprocTrack.
 	MOV	SFXDivCounter, #7
 	MOV	MiscDivCounter, #4
+	MOV	ActiveSFXCount, A
 
 	MOV	X, #8
 	MOV	Y, #16
@@ -1556,11 +1561,27 @@ PlaySFX:	; $1178
 	ASL	A
 	MOV	Y, A
 
-	MOV	A, DSPAddrLUT+X
+	MOV	0, Timer1_out
+	;CLRC
+	ADC	SFXDivCounter, 0
+	ADC	MiscDivCounter, 0
+
+	MOV	A, SndFlags+8+X
+	AND	A, #1
+	BNE	+
+	INC	ActiveSFXCount
++	CMP	ActiveSFXCount, #1
+	BNE	+
+	MOV	SFXDivCounter, #6
+
++	MOV	A, DSPAddrLUT+X
 	OR	A, #7
 	MOV	DSPAddr, A
-	MOV	DSPData, #$9F	; Linear fade-out, rate 15
-	CLR1	DSPAddr
+	MOV	DSPData, #$BF	; Exponential fade-out, rate 15
+	CMP	SFXDivCounter, #7
+	BCS	+
+	CLR5	DSPData		; Linear fade-out, rate 15
++	CLR1	DSPAddr
 	CLR7	DSPData		; Switch to GAIN envelope mode.
 
 	MOV	A, SndFlags+X
@@ -1590,8 +1611,10 @@ PlaySFX:	; $1178
 	MOV	VibDelta+8+X, A
 	MOV	TremDelta+8+X, A
 	INC	A	; A = 1
-	MOV	NoteDur_L+8+X, A
 	MOV	SndEnvLvl+8+X, A
+	CMP	SFXDivCounter, #7
+	ADC	A, #0
+	MOV	NoteDur_L+8+X, A
 
 	; Set volume to 127 at centre.
 	MOV	A, #127
